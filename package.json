@@ -1,0 +1,21 @@
+{
+  "name": "project-admin-kit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A reusable Firebase admin console and autonomous agent operations platform.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "configure": "node scripts/configure.js",
+    "bootstrap-admin": "node scripts/admin-users.js add",
+    "build": "npm --prefix admin-app run build",
+    "test": "npm run test:admin && npm run test:functions && npm run test:agents",
+    "test:admin": "npm --prefix admin-app test",
+    "test:functions": "npm --prefix functions test",
+    "test:agents": "npm --prefix scripts test",
+    "test:rules": "firebase emulators:exec --only firestore,storage --project demo-project-admin \"npm --prefix admin-app run test:rules\"",
+    "install:all": "npm ci --prefix admin-app && npm ci --prefix functions && npm ci --prefix scripts"
+  },
+  "license": "MIT"
+}

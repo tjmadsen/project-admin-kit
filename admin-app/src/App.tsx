@@ -1,0 +1,78 @@
+import { useEffect, useState } from 'react'
+import { Navigate, Route, Routes } from 'react-router-dom'
+import { onAuthStateChanged, type User } from 'firebase/auth'
+import { auth } from './lib/firebase'
+import { subscribeToAccessRole, type AccessRole } from './lib/auth'
+import { signOutAdmin } from './lib/native-bridge'
+import Login from './pages/Login'
+import Layout from './components/Layout'
+import Dashboard from './pages/Dashboard'
+import WorkItems from './pages/WorkItems'
+import AgentLoops from './pages/AgentLoops'
+import Activity from './pages/Activity'
+import Operations from './pages/Operations'
+import Users from './pages/Users'
+import { DetailBackProvider } from './components/DetailBackContext'
+import { projectConfig } from './lib/project-config'
+
+export default function App() {
+  const [user, setUser] = useState<User | null | undefined>(undefined)
+  const [role, setRole] = useState<AccessRole | null | undefined>(undefined)
+  const [accessError, setAccessError] = useState('')
+
+  useEffect(() => onAuthStateChanged(auth, (nextUser) => {
+    setUser(nextUser)
+  }), [])
+
+  useEffect(() => {
+    setRole(undefined)
+    setAccessError('')
+    if (!user) {
+      if (user === null) setRole(null)
+      return
+    }
+    return subscribeToAccessRole(user, (nextRole, error) => {
+      setRole(nextRole)
+      setAccessError(error?.message || '')
+    })
+  }, [user])
+
+  if (user === undefined || role === undefined) return <div className="boot-screen"><div className="spinner" /><p>Opening the control room…</p></div>
+  if (!user) return <Login />
+  if (!role) {
+    return (
+      <div className="auth-screen">
+        <div className="auth-card denied-card">
+          <div className="auth-mark">!</div>
+          <p className="eyebrow">Access denied</p>
+          <h1>This console is private.</h1>
+          <p><strong>{user.email}</strong> is signed in, but is not an active {projectConfig.project.name} collaborator.</p>
+          {accessError && <p className="form-error">{accessError}</p>}
+          <button className="button secondary wide" onClick={() => void signOutAdmin(auth)}>Sign out</button>
+        </div>
+      </div>
+    )
+  }
+
+  const actorName = user.displayName?.trim()
+    || (user.email?.toLowerCase() === projectConfig.admin.ownerEmail.toLowerCase()
+      ? projectConfig.admin.ownerName
+      : projectConfig.admin.defaultCollaboratorName)
+
+  return (
+    <DetailBackProvider>
+      <Layout user={user} role={role}>
+        <Routes>
+          <Route path="/" element={role === 'admin' ? <Dashboard /> : <Navigate to="/features" replace />} />
+          <Route path="/features" element={<WorkItems kind="feature" canManage={role === 'admin'} actorEmail={user.email || ''} actorName={actorName} />} />
+          <Route path="/bugs" element={<WorkItems kind="bug" canManage={role === 'admin'} actorEmail={user.email || ''} actorName={actorName} />} />
+          <Route path="/loops" element={<AgentLoops canManage={role === 'admin'} />} />
+          <Route path="/activity" element={<Activity readOnly={role !== 'admin'} />} />
+          <Route path="/users" element={role === 'admin' ? <Users currentEmail={user.email || ''} /> : <Navigate to="/features" replace />} />
+          <Route path="/operations" element={role === 'admin' ? <Operations /> : <Navigate to="/features" replace />} />
+          <Route path="*" element={<Navigate to={role === 'admin' ? '/' : '/features'} replace />} />
+        </Routes>
+      </Layout>
+    </DetailBackProvider>
+  )
+}

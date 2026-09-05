@@ -1,0 +1,159 @@
+---
+description: Advance exactly one Project Admin feature request to its next explicit human or release gate
+argument-hint: "[sol|terra|luna|opus|sonnet|fable|grok]"
+---
+
+# Project Admin feature loop — one lifecycle step
+
+Load the repository's project-specific names and targets before any command:
+
+```bash
+eval "$(node scripts/project-env.js shell)"
+```
+
+You are the feature worker identified by `$ARGUMENTS`. Advance exactly one
+feature request, honor the latest human decision, and leave the item at an
+explicit gate. The Firestore thread is the durable conversation; admin actions
+are the authority boundary.
+
+You are headless: there is no interactive chat or terminal and nobody can reply
+during the turn. The Firestore item thread is the only human channel. Every
+handoff must use a backlog CLI lifecycle mutation; record a question with `ask`
+because a prose question cannot reach the project owner.
+
+## 1. Sync and claim
+
+1. Read `AGENTS.md`, then run `git fetch origin "$DEFAULT_BRANCH"`.
+2. Claim the owned item with
+   `node scripts/feature-agent.js next --as <agent>`.
+3. Stop on `{"none":true}`. Otherwise read the full description, attachments,
+   delivery fields, messages, and `approvedGate`.
+4. Refer to the item as FR-N, never by its Firestore id in prose.
+
+## 2. Honor the lifecycle
+
+- `approvedGate: triage|question` means the project owner approved implementation or answered
+  the question. The newest the project owner message is authoritative.
+- `approvedGate: pr_review` means the project owner accepted the PR direction. Inspect the PR;
+  when release is needed, record the exact next deployment with
+  `deploy-pending` instead of reopening the same review.
+- `approvedGate: acceptance_review` means the project owner requested another implementation
+  pass after trying a deployed/TestFlight build. Resume the recorded branch and
+  address that feedback.
+- If the project owner explicitly authorizes a normally gated release in the thread, preserve
+  that intent with `deploy-pending --targets ...`. Do not answer with a policy
+  refusal or ask the project owner to repeat the authorization.
+
+The feature loop does not merge or deploy. It translates approved release intent
+into the deploy gate for the dedicated deploy loop.
+
+## 3. Decide and implement
+
+- If required information is ambiguous or missing, ask instead of guessing.
+  Offer concrete lettered options ("A) ... B) ... C) ...") so the project owner can answer with
+  a single letter, then run
+  `node scripts/feature-agent.js ask <id> --as <agent> -m "..."` and stop.
+- For clear implementation work, set up an isolated worktree:
+
+  1. `git worktree add .agent-worktrees/<agent>-fr-N "origin/$DEFAULT_BRANCH" -b <agent>/fr-N`
+     for a fresh item, or resume the recorded branch as described below.
+  2. `scripts/agent-loops/provision-worktree.sh .agent-worktrees/<agent>-fr-N`
+     — a fresh checkout has no `auth.env` and no `node_modules`, so the backlog
+     CLI and every suite fail there until this runs. It is idempotent, so run it
+     on resume too; `--dry-run` prints the plan without touching anything.
+
+  Never implement in the shared primary checkout.
+- `branchName` is the durable cross-agent, cross-machine handle for the item. It
+  lives on `origin` and outlives worktree cleanup and ownership changes, so when
+  the claimed item already carries one, always
+  `git fetch origin <branchName>` and base the worktree on `origin/<branchName>`
+  to continue that history. Never recreate a branch the item already names.
+- Screenshots and comparison images go into the thread as attachments, not
+  GitHub links: pass `--images a.png,b.png` (up to 10 files) with any `reply`,
+  `ask`, `pr`, or `deploy-pending` message. The CLI uploads them to Firebase
+  Storage and the admin console renders them inline.
+- A deploy-loop conflict handback is an exceptional resume path, not a new
+  review cycle. The handback note names the approved PR/branch plus its reviewed
+  base and head audit SHAs. Fetch that recorded branch and `origin/$DEFAULT_BRANCH`,
+  confirm the branch still ends at the reviewed head, and merge `origin/$DEFAULT_BRANCH`
+  into it. Keep all conflict resolution in that merge commit; do not add a
+  non-merge commit. Run the focused tests, compare the reviewed and repaired
+  patch with `git range-diff`, and confirm
+  `git rev-list --no-merges <reviewed-head>..HEAD --not origin/$DEFAULT_BRANCH` is empty.
+  Compare the PR file lists before and after and inspect `git show --cc HEAD` for
+  the conflict-resolution delta. If the file set and behavior are unchanged,
+  push and preserve the project owner's existing release grant with:
+
+  ```bash
+  node scripts/feature-agent.js set <id> --as <agent> \
+    --status ready_for_deploy --waiting deployer --gate none \
+    -m "Mechanical merge repair complete for PR #N on <branch>; reviewed behavior and approved targets are unchanged; focused tests pass."
+  ```
+
+  Do not call `pr` or `deploy-pending` on that safe path. If resolving the
+  conflict changes behavior, files, PR identity, branch, or release targets,
+  use the normal `pr` review and fresh `deploy-pending` approval path.
+- Implement the smallest complete solution, add tests, and run the relevant
+  Flutter/admin/Node suites from the `AGENTS.md` test matrix.
+- Give simulator, screenshot, and integration commands an explicit timeout of
+  at most 60 minutes. Wait for every background task before handing off.
+- Use `reply` only for material progress and at most once per ~20 minutes: a
+  phase finished, a result landed, or a long job died. If the newest thread
+  message is under ~20 minutes old and nothing changed, post nothing. The run
+  heartbeat already shows the loop is alive, and repeated "still working" notes
+  bury the project owner's own messages and churn the item's updated time.
+- Commit, push, and open or update the PR with `gh`. Record it with:
+
+```bash
+node scripts/feature-agent.js pr <id> --as <agent> \
+  --url <url> --number <number> --branch <branch> \
+  -m "tests and concise summary"
+```
+
+## 4. Hand off the release
+
+After PR approval, derive every release surface from the PR file list and the project owner's
+latest message. Read `.claude/commands/deploy-loop.md`, then record:
+
+```bash
+node scripts/feature-agent.js deploy-pending <id> --as <agent> \
+  --targets <comma-separated-targets> \
+  --notes $'Scope: ...\nCommands: ...\nVerification: ...\nAcceptance: ...' \
+  -m "ready for deployment approval"
+```
+
+Allowed targets are `testflight`, `firebase_hosting`, `firebase_functions`,
+`firebase_rules_indexes`, `vercel`, `flutter_web`, `cloud_run`, and `none`.
+Select every required surface explicitly; never use `mixed`. The notes must give
+exact commands/order, target-specific live proof, and observable acceptance.
+Identify the release by PR number, recorded branch, approved targets/surfaces,
+and expected behavior. Never make the grant conditional on the PR head equaling
+a fixed SHA or on `headRefOid` equality; SHAs belong only in audit/comparison
+evidence. For target `none`, use the deploy runbook's standard fetch, ancestry,
+show-stat, and `deploy-check` sequence from the merged deploy worktree plus the
+focused tests that prove the item. Do not prescribe the entire agent-tool suite
+when it is unrelated to the change.
+For TestFlight, preserve whether the project owner wants the item left open for hands-on
+acceptance; the deploy loop always returns it to `acceptance_review`.
+
+If the approved PR (or the finished research/audit) leaves nothing to release,
+close the item yourself instead of routing it through the deploy loop:
+
+```bash
+node scripts/feature-agent.js close-no-deploy <id> --as <agent> \
+  -m "How the work was completed and where the result lives"
+```
+
+It marks the item shipped with the note in the thread and no deployment
+timestamps. It refuses while any release scope is planned, approved, queued, or
+in flight; clear the targets or ask the project owner first in that case.
+
+Every run must leave FR-N in a state the owner can read at a glance: `waitingOn:
+"human"` behind an explicit gate (question, PR review, deploy approval), shipped
+or closed, or still `in_progress` only while a background job you actually
+started is running.
+
+Remove the isolated worktree only after the branch is pushed and the item is at
+an explicit gate. Always pass `--as <agent>`. Never edit Firestore directly,
+force-push, bypass red checks, guess through ambiguity, or leave an item silently
+leased.

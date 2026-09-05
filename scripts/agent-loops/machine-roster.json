@@ -1,0 +1,11 @@
+{
+  "machines": [
+    {
+      "id": "local-mac",
+      "label": "Local Mac",
+      "repoRoot": "REPLACE_BY_RUNNING_NPM_CONFIGURE",
+      "agents": ["sol", "terra", "luna", "opus", "sonnet", "fable", "grok"],
+      "queues": ["feature", "bug", "deploy"]
+    }
+  ]
+}

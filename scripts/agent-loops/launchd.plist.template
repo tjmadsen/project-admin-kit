@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>__LABEL__</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__REPO__/scripts/agent-loops/loop-wrapper.sh</string>
+    <string>__AGENT__</string>
+    <string>__QUEUE__</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>__PATH__</string>
+    <key>PROJECT_ADMIN_MACHINE_ID</key><string>__MACHINE__</string>
+  </dict>
+  <key>StartInterval</key><integer>__INTERVAL__</integer>
+  <key>RunAtLoad</key><true/>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>__LOGDIR__/__AGENT__-__QUEUE__.log</string>
+  <key>StandardErrorPath</key><string>__LOGDIR__/__AGENT__-__QUEUE__.error.log</string>
+</dict>
+</plist>

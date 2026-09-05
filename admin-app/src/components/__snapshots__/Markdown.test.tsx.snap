@@ -1,0 +1,18 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Markdown > snapshots a representative agent note with GFM and hard line breaks 1`] = `
+"<div class="markdown"><h3>Release plan</h3>
+<ol>
+<li>Build the admin
+<ul>
+<li>Keep the nested check</li>
+</ul>
+</li>
+<li>Verify FR-12</li>
+</ol>
+<pre><code class="language-sh">npm test
+</code></pre>
+<table><thead><tr><th>Surface</th><th>State</th></tr></thead><tbody><tr><td>Hosting</td><td>Ready</td></tr></tbody></table>
+<p>See <a class="work-item-link" href="https://example.com/release" target="_blank" rel="noopener noreferrer">https://example.com/release</a>.<br>
+Next line stays separate.</p></div>"
+`;

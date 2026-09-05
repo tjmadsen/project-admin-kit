@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#07110d" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Project Admin</title>
+    <script>
+      // Applies the stored appearance before first paint so a dark preference
+      // never flashes the light palette. Mirrors src/lib/theme.ts: same storage
+      // key, same values, same theme-color pair. Keep the two in sync.
+      (function () {
+        try {
+          var stored = window.localStorage && window.localStorage.getItem('project-admin-theme');
+          var preference = stored === 'light' || stored === 'dark' ? stored : 'system';
+          var shell = window.__adminNativeShell;
+          var native = shell && (shell.appearance === 'light' || shell.appearance === 'dark') ? shell.appearance : null;
+          document.documentElement.setAttribute('data-theme', preference === 'system' && native ? native : preference);
+          var dark = preference === 'dark' || (preference === 'system' && (native ? native === 'dark' : Boolean(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)));
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute('content', dark ? '#0d1411' : '#07110d');
+        } catch (error) {
+          /* Storage is unavailable; the stylesheet falls back to the system appearance. */
+        }
+      })();
+    </script>
+    <script type="module" crossorigin src="/admin/assets/index-uifwYC2o.js"></script>
+    <link rel="modulepreload" crossorigin href="/admin/assets/react-a7R62c8v.js">
+    <link rel="modulepreload" crossorigin href="/admin/assets/firebase-Drc1hB0K.js">
+    <link rel="stylesheet" crossorigin href="/admin/assets/index-CDQlKODT.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
