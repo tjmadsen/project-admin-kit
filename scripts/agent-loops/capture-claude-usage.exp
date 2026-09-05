@@ -1,0 +1,53 @@
+#!/usr/bin/expect -f
+# Capture Claude Code's screen-reader-friendly /usage view in a bounded PTY.
+
+if {$argc < 1 || $argc > 2} {
+  exit 64
+}
+
+set claude_bin [lindex $argv 0]
+set timeout 20
+if {$argc == 2 && [string is integer -strict [lindex $argv 1]] && [lindex $argv 1] > 0} {
+  set timeout [lindex $argv 1]
+}
+
+set env(TERM) xterm-256color
+set env(NO_COLOR) 1
+match_max 200000
+log_user 1
+
+proc stop_child {} {
+  catch {send -- "\003"}
+  catch {close}
+  catch {wait}
+}
+
+spawn -noecho $claude_bin --safe-mode --ax-screen-reader
+expect {
+  -nocase -re {do you trust|trust this (folder|directory)} { stop_child; exit 12 }
+  -re {\$} {}
+  timeout { stop_child; exit 10 }
+  eof { exit 11 }
+}
+
+send -- "/usage\r"
+expect {
+  -re {Esc to cancel} {}
+  timeout { stop_child; exit 20 }
+  eof { exit 21 }
+}
+
+send -- "\033"
+set timeout 5
+expect {
+  -re {\$} {}
+  timeout { stop_child; exit 0 }
+  eof { exit 0 }
+}
+
+send -- "/exit\r"
+expect {
+  eof {}
+  timeout { stop_child }
+}
+exit 0

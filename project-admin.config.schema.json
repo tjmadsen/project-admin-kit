@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://project-admin.local/project-admin.config.schema.json",
+  "title": "Project Admin configuration",
+  "type": "object",
+  "required": ["schemaVersion", "project", "firebase", "repository", "admin", "automation", "deployments"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "project": {
+      "type": "object",
+      "required": ["name", "shortName", "slug", "productionUrl", "adminPath", "firebaseProjectId", "firestoreLocation"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "shortName": { "type": "string", "minLength": 1 },
+        "slug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "description": { "type": "string" },
+        "productionUrl": { "type": "string", "format": "uri" },
+        "vercelProductionUrl": { "type": "string", "format": "uri" },
+        "adminPath": { "type": "string", "pattern": "^/" },
+        "firebaseProjectId": { "type": "string", "minLength": 1 },
+        "firestoreLocation": { "type": "string", "minLength": 1 }
+      }
+    },
+    "firebase": {
+      "type": "object",
+      "required": ["apiKey", "authDomain", "storageBucket", "messagingSenderId", "appId"],
+      "additionalProperties": { "type": "string" }
+    },
+    "repository": {
+      "type": "object",
+      "required": ["slug", "defaultBranch"],
+      "properties": {
+        "slug": { "type": "string", "pattern": "^[^/]+/[^/]+$" },
+        "defaultBranch": { "type": "string", "minLength": 1 }
+      }
+    },
+    "admin": {
+      "type": "object",
+      "required": ["ownerName", "ownerEmail", "defaultCollaboratorName"],
+      "properties": {
+        "ownerName": { "type": "string", "minLength": 1 },
+        "ownerEmail": { "type": "string", "format": "email" },
+        "defaultCollaboratorName": { "type": "string", "minLength": 1 }
+      }
+    },
+    "automation": {
+      "type": "object",
+      "required": ["defaultMachineId", "defaultMachineLabel", "defaultWorkAgent", "defaultDeployAgent", "stateDirectory", "logDirectoryName"],
+      "additionalProperties": { "type": "string" }
+    },
+    "deployments": {
+      "type": "object",
+      "additionalProperties": { "type": "boolean" }
+    }
+  }
+}

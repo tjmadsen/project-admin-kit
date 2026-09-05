@@ -1,0 +1,16 @@
+{
+  "name": "project-admin-agent-tools",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Firestore-backed backlog and autonomous loop tools for Project Admin",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@google-cloud/firestore": "^9.0.0",
+    "google-auth-library": "^9.15.1"
+  }
+}

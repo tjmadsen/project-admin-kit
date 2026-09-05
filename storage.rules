@@ -1,0 +1,62 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function hasVerifiedAccessRecord() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email is string
+        && firestore.exists(/databases/(default)/documents/adminUsers/$(request.auth.token.email));
+    }
+
+    function currentAccess() {
+      return firestore.get(/databases/(default)/documents/adminUsers/$(request.auth.token.email)).data;
+    }
+
+    function isAdmin() {
+      return hasVerifiedAccessRecord()
+        && currentAccess().active == true
+        && currentAccess().role == 'admin';
+    }
+
+    function isCollaborator() {
+      return hasVerifiedAccessRecord()
+        && currentAccess().active == true
+        && currentAccess().role in ['admin', 'collaborator'];
+    }
+
+    function isWorkItemKind(kind) {
+      return kind == 'feature' || kind == 'bug';
+    }
+
+    function isSupportedWorkItemAttachment(fileName) {
+      return request.resource.contentType.matches('image/.*')
+        || (request.resource.contentType == 'application/pdf'
+          && fileName.matches('.*[.][pP][dD][fF]'))
+        || (request.resource.contentType == 'text/csv'
+          && fileName.matches('.*[.][cC][sS][vV]'))
+        || (request.resource.contentType == 'text/plain'
+          && fileName.matches('.*[.][tT][xX][tT]'));
+    }
+
+    match /work-item-attachments/{uploaderUid}/{kind}/{itemId}/{fileName} {
+      allow read: if isCollaborator();
+      allow create: if isCollaborator()
+        && request.auth.uid == uploaderUid
+        && request.resource.size <= 25 * 1024 * 1024
+        && isSupportedWorkItemAttachment(fileName)
+        && request.resource.metadata.uploaderEmail == request.auth.token.email
+        && (isAdmin() || isWorkItemKind(kind));
+      allow update: if false;
+      allow delete: if isAdmin()
+        || (isCollaborator()
+          && request.auth.uid == uploaderUid
+          && resource.metadata.uploaderEmail == request.auth.token.email
+          && isWorkItemKind(kind));
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

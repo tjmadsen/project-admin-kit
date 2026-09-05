@@ -1,0 +1,242 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function hasVerifiedEmail() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email is string;
+    }
+
+    function currentAccess() {
+      return get(/databases/$(database)/documents/adminUsers/$(request.auth.token.email)).data;
+    }
+
+    function hasAccessRecord() {
+      return hasVerifiedEmail()
+        && exists(/databases/$(database)/documents/adminUsers/$(request.auth.token.email));
+    }
+
+    function isAdmin() {
+      return hasAccessRecord()
+        && currentAccess().active == true
+        && currentAccess().role == 'admin';
+    }
+
+    function isCollaborator() {
+      return hasAccessRecord()
+        && currentAccess().active == true
+        && currentAccess().role in ['admin', 'collaborator'];
+    }
+
+    function projectSettings() {
+      return get(/databases/$(database)/documents/system/projectConfig).data;
+    }
+
+    function pushDeviceTokenIsOwned(data, tokenId) {
+      return isCollaborator()
+        && data.uid == request.auth.uid
+        && data.email == request.auth.token.email
+        && data.deviceId is string && data.deviceId.size() > 0 && data.deviceId.size() <= 100
+        && tokenId == data.uid + '_' + data.deviceId;
+    }
+
+    function pushDeviceTokenIsValid(data, tokenId) {
+      return pushDeviceTokenIsOwned(data, tokenId)
+        && data.keys().hasAll(['uid', 'email', 'deviceId', 'token', 'platform', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'deviceId', 'token', 'platform', 'createdAt', 'updatedAt'])
+        && data.uid is string && data.uid.size() > 0 && data.uid.size() <= 128
+        && data.email == request.auth.token.email
+        && data.token is string && data.token.size() > 0 && data.token.size() <= 2048
+        && data.platform == 'ios_admin'
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function collaboratorCounterAdvanceIsValid() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return changed.hasOnly(['nextFeatureNumber', 'nextBugNumber', 'updatedAt'])
+        && request.resource.data.updatedAt == request.time
+        && (
+          (request.resource.data.nextFeatureNumber == resource.data.nextFeatureNumber + 1
+            && request.resource.data.nextBugNumber == resource.data.nextBugNumber)
+          ||
+          (request.resource.data.nextBugNumber == resource.data.nextBugNumber + 1
+            && request.resource.data.nextFeatureNumber == resource.data.nextFeatureNumber)
+        );
+    }
+
+    function collaboratorSubmissionIsValid(kind) {
+      let data = request.resource.data;
+      let counterBefore = get(/databases/$(database)/documents/system/counters).data;
+      let counterAfter = getAfter(/databases/$(database)/documents/system/counters).data;
+      let expectedNumber = kind == 'feature' ? counterAfter.nextFeatureNumber : counterAfter.nextBugNumber;
+      let previousNumber = kind == 'feature' ? counterBefore.nextFeatureNumber : counterBefore.nextBugNumber;
+      return data.keys().hasOnly([
+          'kind', 'number', 'title', 'description', 'imageUrls', 'priority', 'status', 'waitingOn', 'blockedReason',
+          'assignedTo', 'thinkingEffort', 'targetMachine', 'deploymentType', 'deploymentTargets', 'messages',
+          'createdByEmail', 'createdByRole', 'createdAt', 'updatedAt'
+        ])
+        && data.kind == kind
+        && data.number is int
+        && data.number == expectedNumber
+        && expectedNumber == previousNumber + 1
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 200
+        && data.description is string && data.description.size() > 0 && data.description.size() <= 10000
+        && data.imageUrls is list && data.imageUrls.size() <= 10
+        && data.priority in ['critical', 'high', 'medium', 'low']
+        && data.status == (kind == 'feature' ? 'backlog' : 'open')
+        && data.waitingOn == 'human'
+        && data.blockedReason == 'triage'
+        && data.assignedTo == projectSettings().defaultWorkOwner
+        && data.thinkingEffort == 'xhigh'
+        && data.targetMachine == projectSettings().defaultMachineId
+        && data.deploymentType == 'none'
+        && data.deploymentTargets is list && data.deploymentTargets.size() == 0
+        && data.messages is list && data.messages.size() == 0
+        && data.createdByEmail == request.auth.token.email
+        && data.createdByRole == 'collaborator'
+        && data.createdAt == request.time
+        && data.updatedAt == request.time;
+    }
+
+    function collaboratorMessageIsValid() {
+      let data = request.resource.data;
+      let changed = data.diff(resource.data).affectedKeys();
+      let messageCount = data.messages.size();
+      let message = data.messages[messageCount - 1];
+      let appendsOneMessage = resource.data.messages is list
+        && data.messages is list
+        && messageCount == resource.data.messages.size() + 1
+        && data.messages == resource.data.messages.concat([message])
+        && message is map
+        && message.keys().hasAll(['author', 'authorEmail', 'body', 'imageUrls', 'createdAt'])
+        && message.keys().hasOnly(['author', 'authorEmail', 'body', 'imageUrls', 'createdAt'])
+        && message.author is string && message.author.size() > 0 && message.author.size() <= 100
+        && message.authorEmail == request.auth.token.email
+        && message.body is string && message.body.size() <= 10000
+        && message.imageUrls is list && message.imageUrls.size() <= 10
+        && (message.body.size() > 0 || message.imageUrls.size() > 0)
+        && message.createdAt is timestamp
+        && data.updatedAt == request.time;
+      let onlyAddsNote = changed.hasOnly(['messages', 'updatedAt']);
+      let returnsToAgent = changed.hasOnly([
+          'messages', 'updatedAt', 'waitingOn', 'status', 'blockedReason', 'leaseExpiresAt', 'claimedBy'
+        ])
+        && resource.data.waitingOn == 'human'
+        && resource.data.assignedTo is string && resource.data.assignedTo.size() > 0
+        && resource.data.blockedReason != 'triage'
+        && resource.data.blockedReason != 'deploy_approval'
+        && resource.data.blockedReason != 'acceptance_review'
+        && resource.data.status != 'ready_for_deploy'
+        && data.waitingOn == 'agent'
+        && data.status == 'in_progress'
+        && data.blockedReason == null
+        && data.leaseExpiresAt == null
+        && data.claimedBy == null;
+      return appendsOneMessage && (onlyAddsNote || returnsToAgent);
+    }
+
+    function collaboratorPriorityUpdateIsValid() {
+      let data = request.resource.data;
+      let changed = data.diff(resource.data).affectedKeys();
+      return changed.hasOnly(['priority', 'updatedAt'])
+        && data.priority in ['critical', 'high', 'medium', 'low']
+        && data.updatedAt == request.time;
+    }
+
+    // Dependency routing is an administrator decision. Keep this explicit even
+    // though each collaborator update shape below is already narrowly allow-listed.
+    function collaboratorLeavesDependenciesUnchanged() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['dependsOn']);
+    }
+
+    match /featureRequests/{itemId} {
+      allow read: if isCollaborator();
+      allow create: if isAdmin() || (isCollaborator() && collaboratorSubmissionIsValid('feature'));
+      allow update: if isAdmin() || (isCollaborator() && collaboratorLeavesDependenciesUnchanged()
+        && (collaboratorPriorityUpdateIsValid() || collaboratorMessageIsValid()));
+      allow delete: if isAdmin();
+    }
+
+    match /bugs/{itemId} {
+      allow read: if isCollaborator();
+      allow create: if isAdmin() || (isCollaborator() && collaboratorSubmissionIsValid('bug'));
+      allow update: if isAdmin() || (isCollaborator() && collaboratorLeavesDependenciesUnchanged()
+        && (collaboratorPriorityUpdateIsValid() || collaboratorMessageIsValid()));
+      allow delete: if isAdmin();
+    }
+
+    // The native admin app owns only its authenticated collaborator/device token.
+    // Firebase Admin reads these registrations server-side to target lifecycle FCM.
+    match /pushDeviceTokens/{tokenId} {
+      allow read: if pushDeviceTokenIsOwned(resource.data, tokenId);
+      allow create: if pushDeviceTokenIsValid(request.resource.data, tokenId)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      allow update: if pushDeviceTokenIsValid(resource.data, tokenId)
+        && pushDeviceTokenIsValid(request.resource.data, tokenId)
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.deviceId == resource.data.deviceId
+        && request.resource.data.platform == resource.data.platform
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if pushDeviceTokenIsOwned(resource.data, tokenId);
+    }
+
+    match /system/counters {
+      allow read: if isCollaborator();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (isCollaborator() && collaboratorCounterAdvanceIsValid());
+    }
+
+    // Collaborators can inspect automation health and history. Every write remains
+    // administrator-only, even when a URL or SDK call is forged.
+    match /agentLoopRuns/{runId} {
+      allow read: if isCollaborator();
+      allow write: if isAdmin();
+    }
+
+    match /agentMachines/{machineId} {
+      allow read: if isCollaborator();
+      allow write: if isAdmin();
+    }
+
+    match /system/agentLoopConfig {
+      allow read: if isCollaborator();
+      allow write: if isAdmin();
+    }
+
+    match /system/agentLoopUsage {
+      allow read: if isCollaborator();
+      allow write: if isAdmin();
+    }
+
+    match /system/projectConfig {
+      allow read: if isCollaborator();
+      allow write: if isAdmin();
+    }
+
+    match /adminUsers/{email} {
+      allow read: if isAdmin() || (hasVerifiedEmail() && email == request.auth.token.email);
+      allow create: if isAdmin()
+        && request.resource.data.email == email
+        && request.resource.data.role in ['admin', 'collaborator']
+        && request.resource.data.active is bool;
+      allow update: if isAdmin()
+        && request.resource.data.email == email
+        && request.resource.data.role in ['admin', 'collaborator']
+        && request.resource.data.active is bool
+        && (email != request.auth.token.email
+          || (request.resource.data.role == 'admin' && request.resource.data.active == true));
+      allow delete: if isAdmin() && email != request.auth.token.email;
+    }
+
+    // All other operational data remains administrator-only.
+    match /{collection}/{document=**} {
+      allow read, write: if isAdmin()
+        && collection != 'pushDeviceTokens'
+        && collection != 'adminUsers';
+    }
+  }
+}

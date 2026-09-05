@@ -1,0 +1,48 @@
+{
+  "$schema": "./project-admin.config.schema.json",
+  "schemaVersion": 1,
+  "project": {
+    "name": "My Project",
+    "shortName": "My Project",
+    "slug": "my-project",
+    "description": "Product operations and autonomous delivery control room",
+    "productionUrl": "https://example.com",
+    "vercelProductionUrl": "https://example.com",
+    "adminPath": "/admin",
+    "firebaseProjectId": "replace-with-firebase-project-id",
+    "firestoreLocation": "nam5"
+  },
+  "firebase": {
+    "apiKey": "replace-with-web-api-key",
+    "authDomain": "replace-with-firebase-project-id.firebaseapp.com",
+    "storageBucket": "replace-with-firebase-project-id.firebasestorage.app",
+    "messagingSenderId": "replace-with-sender-id",
+    "appId": "replace-with-web-app-id"
+  },
+  "repository": {
+    "slug": "owner/repository",
+    "defaultBranch": "main"
+  },
+  "admin": {
+    "ownerName": "Project owner",
+    "ownerEmail": "owner@example.com",
+    "defaultCollaboratorName": "Collaborator"
+  },
+  "automation": {
+    "defaultMachineId": "local-mac",
+    "defaultMachineLabel": "Local Mac",
+    "defaultWorkAgent": "sol",
+    "defaultDeployAgent": "sonnet",
+    "stateDirectory": ".project-admin",
+    "logDirectoryName": "ProjectAdminAgentLoops"
+  },
+  "deployments": {
+    "firebaseHosting": true,
+    "firebaseFunctions": true,
+    "firebaseRulesIndexes": true,
+    "vercel": false,
+    "flutterWeb": false,
+    "cloudRun": false,
+    "testflight": false
+  }
+}
