@@ -318,6 +318,30 @@ describe('Project administrator permissions', () => {
     await assertFails(deleteDoc(doc(db, 'adminUsers', adminClaims.email)))
   })
 
+  it('stores well-formed notification preferences and rejects malformed ones', async () => {
+    const db = testEnv.authenticatedContext('owner', adminClaims).firestore()
+    const valid = {
+      email: { action_required: false, deployment_failure: false, deployment_progress: false, final_outcome: true },
+      push: { action_required: true, deployment_failure: true, deployment_progress: true, final_outcome: true },
+    }
+    await assertSucceeds(updateDoc(doc(db, 'adminUsers', adminClaims.email), {
+      email: adminClaims.email, role: 'admin', active: true, notifications: valid, updatedAt: serverTimestamp(),
+    }))
+    await assertSucceeds(updateDoc(doc(db, 'adminUsers', creatorClaims.email), {
+      email: creatorClaims.email, role: 'collaborator', active: true, notifications: { push: { final_outcome: false } }, updatedAt: serverTimestamp(),
+    }))
+    for (const notifications of [
+      { sms: { action_required: true } },
+      { email: { action_required: 'yes' } },
+      { email: { everything: true } },
+      'all',
+    ]) {
+      await assertFails(updateDoc(doc(db, 'adminUsers', creatorClaims.email), {
+        email: creatorClaims.email, role: 'collaborator', active: true, notifications, updatedAt: serverTimestamp(),
+      }))
+    }
+  })
+
   it('lets users read only their own access record', async () => {
     const collaboratorDb = testEnv.authenticatedContext('logan', creatorClaims).firestore()
     await assertSucceeds(getDoc(doc(collaboratorDb, 'adminUsers', creatorClaims.email)))

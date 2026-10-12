@@ -10,7 +10,7 @@ import PageHeader from '../components/PageHeader'
 import WorkItemDependencies, { blockingDependencies, dependencyWaitLabel } from '../components/WorkItemDependencies'
 import { useCollection } from '../hooks/useCollection'
 import { useLoopRuns } from '../hooks/useLoopData'
-import { AGENT_MODELS, DEFAULT_WORK_AGENT, agentByOwner, agentByToken } from '../lib/agents'
+import { AGENT_MODELS, DEFAULT_WORK_AGENT, agentByOwner, agentByToken, thinkingEffortsFor } from '../lib/agents'
 import { attachmentFilesFromDataTransfer, mergeAttachmentFiles, uploadWorkAttachments, type UploadedAttachments } from '../lib/attachments'
 import { DEPLOYMENT_TARGETS, deploymentTargetsFor, legacyDeploymentType, normalizeDeploymentTargets } from '../lib/deployment'
 import { db } from '../lib/firebase'
@@ -524,7 +524,7 @@ function NewItem({ kind, canManage, actorEmail, onClose, onCreated }: { kind: Wo
         <details className="advanced-disclosure">
           <summary>Route now <span>Optional</span></summary>
           <label className="check-field"><input type="checkbox" checked={routeNow} onChange={(event) => setRouteNow(event.target.checked)} /><span><strong>Send directly to an agent</strong><small>Otherwise this starts in your review queue.</small></span></label>
-          {routeNow && <div className="form-grid"><label>Agent model<OwnerSelect value={owner} onChange={setOwner} /></label><label>Thinking effort<select value={effort} onChange={(event) => setEffort(event.target.value as ThinkingEffort)}>{['low', 'medium', 'high', 'xhigh'].map((value) => <option key={value}>{value}</option>)}</select></label></div>}
+          {routeNow && <div className="form-grid"><label>Agent model<OwnerSelect value={owner} onChange={setOwner} /></label><label>Thinking effort<select value={effort} onChange={(event) => setEffort(event.target.value as ThinkingEffort)}>{thinkingEffortsFor(owner, effort).map((value) => <option key={value}>{value}</option>)}</select></label></div>}
         </details>
       </> : <p className="creator-form-note">Your submission defaults to {agentByToken(DEFAULT_WORK_AGENT)?.label || DEFAULT_WORK_AGENT} at xhigh and will be marked for {projectConfig.admin.ownerName} to review. After work starts, you can continue the conversation and attach more files.</p>}
       {error && <p className="form-error">{error}</p>}
@@ -794,7 +794,7 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
 
   const bottomRoutingControls = canManage && !isTerminal ? <div className="detail-action-routing" aria-label="Quick routing controls">
     <label>Priority<select aria-label="Bottom action priority" value={item.priority} disabled={busy} onChange={(event) => void patch({ priority: event.target.value })}>{['critical', 'high', 'medium', 'low'].map((value) => <option key={value}>{value}</option>)}</select></label>
-    <label>Effort<select aria-label="Bottom action effort" value={item.thinkingEffort || 'xhigh'} disabled={busy} onChange={(event) => void patch({ thinkingEffort: event.target.value })}>{['low', 'medium', 'high', 'xhigh'].map((value) => <option key={value}>{value}</option>)}</select></label>
+    <label>Effort<select aria-label="Bottom action effort" value={item.thinkingEffort || 'xhigh'} disabled={busy} onChange={(event) => void patch({ thinkingEffort: event.target.value })}>{thinkingEffortsFor(item.assignedTo, item.thinkingEffort).map((value) => <option key={value}>{value}</option>)}</select></label>
     <label>Machine<select aria-label="Bottom action machine" value={item.targetMachine || projectConfig.automation.defaultMachineId} disabled={busy} onChange={(event) => void patch({ targetMachine: event.target.value })}>{![projectConfig.automation.defaultMachineId, 'any'].includes(item.targetMachine) && <option value={item.targetMachine}>{item.targetMachine}</option>}<option value={projectConfig.automation.defaultMachineId}>{projectConfig.automation.defaultMachineLabel}</option><option value="any">Any machine</option></select></label>
   </div> : null
 
@@ -821,7 +821,7 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
           <label>Priority<select aria-label="Priority" value={item.priority} disabled={busy} onChange={(event) => void patch({ priority: event.target.value })}>{['critical', 'high', 'medium', 'low'].map((value) => <option key={value}>{value}</option>)}</select></label>
           {canManage ? <>
             <label>Agent model<OwnerSelect value={item.assignedTo || ''} onChange={(value) => void patch({ assignedTo: value, claimedBy: null, leaseExpiresAt: null })} /></label>
-            <label>Thinking effort<select aria-label="Thinking effort" value={item.thinkingEffort || 'xhigh'} disabled={busy} onChange={(event) => void patch({ thinkingEffort: event.target.value })}>{['low', 'medium', 'high', 'xhigh'].map((value) => <option key={value}>{value}</option>)}</select></label>
+            <label>Thinking effort<select aria-label="Thinking effort" value={item.thinkingEffort || 'xhigh'} disabled={busy} onChange={(event) => void patch({ thinkingEffort: event.target.value })}>{thinkingEffortsFor(item.assignedTo, item.thinkingEffort).map((value) => <option key={value}>{value}</option>)}</select></label>
           </> : <>
             <ReadonlyField label="Agent model" value={ownerLabel(item.assignedTo)} />
             <ReadonlyField label="Thinking effort" value={item.thinkingEffort || 'xhigh'} />

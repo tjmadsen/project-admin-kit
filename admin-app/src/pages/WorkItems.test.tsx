@@ -442,7 +442,7 @@ describe('WorkItems collaborator access', () => {
     expect([...container.querySelectorAll('.work-list-card > strong')].map((element) => element.textContent)).toEqual(['Newer update', 'Older update'])
   })
 
-  it('defaults routed admin work to Sol with xhigh thinking', () => {
+  it('defaults routed admin work to Sol with xhigh thinking, offering Sol\'s full effort range', () => {
     state.data = []
     render(<WorkItems kind="bug" canManage actorEmail="owner@example.com" />)
     fireEvent.click(screen.getByRole('button', { name: /New bug/i }))
@@ -450,6 +450,21 @@ describe('WorkItems collaborator access', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: /Send directly to an agent/i }))
     expect(screen.getByLabelText('Agent model')).toHaveValue('sol-agent')
     expect(screen.getByLabelText('Thinking effort')).toHaveValue('xhigh')
+    expect([...screen.getByLabelText('Thinking effort').querySelectorAll('option')].map((option) => option.value)).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
+  })
+
+  it('narrows and widens the thinking-effort menu as the routed agent model changes', () => {
+    state.data = []
+    render(<WorkItems kind="bug" canManage actorEmail="owner@example.com" />)
+    fireEvent.click(screen.getByRole('button', { name: /New bug/i }))
+    fireEvent.click(screen.getByText('Route now'))
+    fireEvent.click(screen.getByRole('checkbox', { name: /Send directly to an agent/i }))
+
+    fireEvent.change(screen.getByLabelText('Agent model'), { target: { value: 'grok-agent' } })
+    expect([...screen.getByLabelText('Thinking effort').querySelectorAll('option')].map((option) => option.value)).toEqual(['low', 'medium', 'high', 'xhigh'])
+
+    fireEvent.change(screen.getByLabelText('Agent model'), { target: { value: 'muse-agent' } })
+    expect([...screen.getByLabelText('Thinking effort').querySelectorAll('option')].map((option) => option.value)).toEqual(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
   })
 
   it('keeps an edited create draft when backdrop dismissal is rejected', () => {
