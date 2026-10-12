@@ -14,7 +14,7 @@ import { AGENT_MODELS, DEFAULT_WORK_AGENT, agentByOwner, agentByToken } from '..
 import { attachmentFilesFromDataTransfer, mergeAttachmentFiles, uploadWorkAttachments, type UploadedAttachments } from '../lib/attachments'
 import { DEPLOYMENT_TARGETS, deploymentTargetsFor, legacyDeploymentType, normalizeDeploymentTargets } from '../lib/deployment'
 import { db } from '../lib/firebase'
-import { deploymentLabel, formatRelative, gateLabel, itemRef, matchesItemReference, ownerLabel, toDate, waitingLabel } from '../lib/format'
+import { adminWorkItemPath, deploymentLabel, formatRelative, gateLabel, itemRef, matchesItemReference, ownerLabel, toDate, waitingLabel } from '../lib/format'
 import { readPreference, writePreference } from '../lib/preferences'
 import { preferencePrefix, projectConfig } from '../lib/project-config'
 import type { Owner, Priority, ReviewGate, ThinkingEffort, WorkItem, WorkKind, WorkMessage } from '../lib/types'
@@ -315,7 +315,7 @@ export default function WorkItems({ kind, canManage, actorEmail, actorName = can
     return matchesText && matchesFilter(item, filter) && (ownerFilter === 'all' || item.assignedTo === ownerFilter)
   }), sortKey, sortDirection), [data, filter, kind, ownerFilter, queryText, sortDirection, sortKey])
   const selected = data.find((item) => item.id === selectedId) ?? null
-  const filterValues = ['human', 'agent', 'deployer', 'all']
+  const filterValues = ['human', 'agent', 'deployer', 'hold', 'all']
   const filterCounts = useMemo(() => Object.fromEntries(filterValues.map((value) => [value, data.filter((item) => matchesFilter(item, value)).length])), [data, kind])
   const upNext = useMemo(() => {
     const eligible = sortWorkItems(data.filter((item) => item.waitingOn === 'agent' && !terminal[kind].includes(item.status) && isLeaseOpen(item) && blockingDependencies(item, allItems).length === 0), 'priority', 'asc')
@@ -366,7 +366,7 @@ export default function WorkItems({ kind, canManage, actorEmail, actorName = can
     if (!isDesktopWorkList()) savedListScrollTop.current = listScrollRef.current?.scrollTop ?? 0
     suppressDesktopAutoSelect.current = false
     if (item.kind !== kind) {
-      window.location.assign(`${item.kind === 'feature' ? '/features' : '/bugs'}?item=${encodeURIComponent(itemRef(item.kind, item.number))}`)
+      window.location.assign(adminWorkItemPath(item))
       return
     }
     openItem(item)
@@ -458,17 +458,23 @@ export default function WorkItems({ kind, canManage, actorEmail, actorName = can
 }
 
 function NewItem({ kind, canManage, actorEmail, onClose, onCreated }: { kind: WorkKind; canManage: boolean; actorEmail: string; onClose: () => void; onCreated: (id: string) => void }) {
+  const defaultOwner = agentByToken(DEFAULT_WORK_AGENT)?.owner || 'sol-agent'
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [priority, setPriority] = useState<Priority>('medium')
   const [routeNow, setRouteNow] = useState(false)
-  const [owner, setOwner] = useState<Owner>(agentByToken(DEFAULT_WORK_AGENT)?.owner || 'sol-agent')
+  const [owner, setOwner] = useState<Owner>(defaultOwner)
   const [effort, setEffort] = useState<ThinkingEffort>('xhigh')
   const [attachments, setAttachments] = useState<File[]>([])
   const [attachmentError, setAttachmentError] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [draftId] = useState(() => doc(collectionRef(kind)).id)
+  const hasUnsavedChanges = title !== '' || description !== '' || priority !== 'medium' || routeNow || owner !== defaultOwner || effort !== 'xhigh' || attachments.length > 0
+  const requestClose = () => {
+    if (saving) return
+    if (!hasUnsavedChanges || window.confirm('Discard this draft? Your changes will be lost.')) onClose()
+  }
   const addAttachments = (incoming: File[]) => setAttachments((current) => {
     const merged = mergeAttachmentFiles(current, incoming)
     setAttachmentError(merged.error)
@@ -507,7 +513,7 @@ function NewItem({ kind, canManage, actorEmail, onClose, onCreated }: { kind: Wo
     }
   }
 
-  return <Modal title={`New ${kind === 'feature' ? 'feature request' : 'bug'}`} onClose={saving ? () => undefined : onClose}>
+  return <Modal title={`New ${kind === 'feature' ? 'feature request' : 'bug'}`} onClose={requestClose}>
     <form className="form-stack" onSubmit={submit}>
       <label>Title<input required autoFocus value={title} onChange={(event) => setTitle(event.target.value)} /></label>
       <label>Description<textarea required rows={6} value={description} onPaste={handlePaste} onChange={(event) => setDescription(event.target.value)} placeholder="Describe the goal or problem. You can paste supported attachments here." /></label>
@@ -522,7 +528,7 @@ function NewItem({ kind, canManage, actorEmail, onClose, onCreated }: { kind: Wo
         </details>
       </> : <p className="creator-form-note">Your submission defaults to {agentByToken(DEFAULT_WORK_AGENT)?.label || DEFAULT_WORK_AGENT} at xhigh and will be marked for {projectConfig.admin.ownerName} to review. After work starts, you can continue the conversation and attach more files.</p>}
       {error && <p className="form-error">{error}</p>}
-      <div className="form-actions"><button type="button" className="button secondary" onClick={onClose} disabled={saving}>Cancel</button><button className="button primary" disabled={saving}>{saving ? 'Uploading & creating…' : canManage ? (routeNow ? 'Create & queue' : 'Create for review') : 'Submit for review'}</button></div>
+      <div className="form-actions"><button type="button" className="button secondary" onClick={requestClose} disabled={saving}>Cancel</button><button className="button primary" disabled={saving}>{saving ? 'Uploading & creating…' : canManage ? (routeNow ? 'Create & queue' : 'Create for review') : 'Submit for review'}</button></div>
     </form>
   </Modal>
 }
