@@ -948,7 +948,7 @@ a { color: inherit; text-decoration: none; }
   .reply-tools .quick-replies { margin-bottom: 6px; }
   .reply-tools .reply-compose-toolbar { margin: 0; }
   .compact-detail-reply .reply-compose { grid-template-columns: minmax(0, 1fr) 44px; align-items: end; gap: 6px; }
-  .compact-detail-reply textarea, .compact-detail-reply .reply-preview { min-height: 44px; max-height: 88px; padding: 8px 9px; resize: none; line-height: 1.35; }
+  .compact-detail-reply textarea, .compact-detail-reply .reply-preview { min-height: 44px; max-height: min(148px, calc(var(--app-height, 100dvh) * .25)); padding: 8px 9px; resize: none; line-height: 1.35; }
   .compact-detail-reply .attachment-picker.compact { display: contents; }
   .compact-detail-reply .attachment-picker.compact .pending-attachments { grid-column: 1 / -1; grid-row: 2; grid-template-columns: repeat(auto-fill, minmax(58px, 82px)); }
   .compact-detail-reply .attachment-picker.compact .attachment-dropzone { width: 44px; min-height: 44px; height: 44px; padding: 0; display: grid; grid-column: 2; grid-row: 1; place-items: center; border-style: solid; text-align: center; }

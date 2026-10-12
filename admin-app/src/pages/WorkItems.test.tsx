@@ -343,6 +343,75 @@ describe('phone detail viewport sizing', () => {
     await waitFor(() => expect(appShell.style.getPropertyValue('--app-height')).toBe('744px'))
     cleanup()
   })
+
+  it('returns a keyboard-scrolled page to the top so the shell never sits off-screen', async () => {
+    usePhoneDetailLayout()
+    const listeners = new Map<string, EventListener>()
+    const viewport = {
+      height: 700,
+      offsetTop: 0,
+      addEventListener: vi.fn((type: string, listener: EventListener) => listeners.set(type, listener)),
+      removeEventListener: vi.fn((type: string) => listeners.delete(type)),
+    }
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport })
+    const scrollYDescriptor = Object.getOwnPropertyDescriptor(window, 'scrollY')
+    let pageOffset = 0
+    Object.defineProperty(window, 'scrollY', { configurable: true, get: () => pageOffset })
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => { pageOffset = 0; viewport.offsetTop = 0 })
+    const appShell = document.createElement('div')
+
+    const cleanup = syncPhoneDetailHeight(appShell, null)
+    await waitFor(() => expect(appShell.style.getPropertyValue('--app-height')).toBe('700px'))
+    expect(scrollTo).not.toHaveBeenCalled()
+
+    // iOS scrolls the page up to reveal the focused note box as the keyboard opens.
+    pageOffset = 380
+    viewport.height = 320
+    listeners.get('resize')?.(new Event('resize'))
+    await waitFor(() => expect(appShell.style.getPropertyValue('--app-height')).toBe('320px'))
+    expect(window.scrollY).toBe(0)
+
+    // Closing the keyboard must not leave the header cut off and a gap at the bottom.
+    viewport.offsetTop = 120
+    viewport.height = 700
+    listeners.get('resize')?.(new Event('resize'))
+    await waitFor(() => expect(appShell.style.getPropertyValue('--app-height')).toBe('700px'))
+    expect(viewport.offsetTop).toBe(0)
+
+    cleanup()
+    scrollTo.mockRestore()
+    if (scrollYDescriptor) Object.defineProperty(window, 'scrollY', scrollYDescriptor)
+  })
+})
+
+describe('phone note composer', () => {
+  const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'scrollHeight')
+
+  afterEach(() => {
+    if (scrollHeightDescriptor) Object.defineProperty(HTMLTextAreaElement.prototype, 'scrollHeight', scrollHeightDescriptor)
+  })
+
+  it('grows the note box as a long note is typed and shrinks it after sending', async () => {
+    usePhoneDetailLayout()
+    Object.defineProperty(HTMLTextAreaElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get(this: HTMLTextAreaElement) { return 16 + 22 * Math.max(1, this.value.split('\n').length) },
+    })
+    state.data = [{ ...approvable, waitingOn: 'agent', status: 'in_progress', blockedReason: undefined }]
+    window.history.replaceState({}, '', '/admin/features?item=FR-1')
+    render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+    const composer = await screen.findByLabelText('Add note')
+    const oneLine = composer.style.height
+
+    fireEvent.change(composer, { target: { value: 'First line\nsecond\nthird\nfourth' } })
+    expect(parseFloat(composer.style.height)).toBeGreaterThan(parseFloat(oneLine) || 0)
+    expect(composer.style.height).toBe('106px')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add note' }))
+    await waitFor(() => expect(firestore.updateDoc).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.getByLabelText('Add note')).toHaveValue(''))
+    expect(screen.getByLabelText('Add note').style.height).toBe('40px')
+  })
 })
 
 describe('WorkItems collaborator access', () => {
@@ -615,7 +684,7 @@ describe('WorkItems collaborator access', () => {
     const target: WorkItem = { ...item, id: 'feature-2', number: 2, title: 'Linkify target' }
     const messages = [
       { author: 'Codex Sol', body: 'Blocked on **FR-2**. See [PR #42](https://github.com/example/repo/pull/42) and https://example.com/docs.', createdAt: null },
-      { author: 'Project owner', body: 'Approved, continue with FR-2', createdAt: null },
+      { author: 'Owner', body: 'Approved, continue with FR-2', createdAt: null },
     ]
     state.data = [{ ...item, messages }, target]
     const view = render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)

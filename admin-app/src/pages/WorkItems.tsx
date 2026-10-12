@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { Timestamp, arrayUnion, collection, doc, runTransaction, serverTimestamp, updateDoc } from 'firebase/firestore'
 import EmptyState from '../components/EmptyState'
 import ActiveAgentBadge from '../components/ActiveAgentBadge'
@@ -57,6 +57,10 @@ export function syncPhoneDetailHeight(appShell: HTMLElement, thread: HTMLElement
     const wasNearBottom = Boolean(thread && threadNearBottom(thread))
     const viewportHeight = Math.round(visualViewport?.height || targetWindow.innerHeight)
     if (viewportHeight > 0) appShell.style.setProperty('--app-height', `${viewportHeight}px`)
+    // iOS scrolls the page to reveal the focused note box when the keyboard
+    // opens. html/body never scroll, so the offset would strand the shell above
+    // the viewport (blank screen) and outlive the keyboard as a bottom gap.
+    if (targetWindow.scrollY > 0 || (visualViewport?.offsetTop || 0) > 0) targetWindow.scrollTo(0, 0)
     if (thread) {
       thread.scrollTop = wasNearBottom
         ? Math.max(0, thread.scrollHeight - thread.clientHeight)
@@ -76,6 +80,7 @@ export function syncPhoneDetailHeight(appShell: HTMLElement, thread: HTMLElement
 
   visualViewport?.addEventListener('resize', schedule)
   visualViewport?.addEventListener('scroll', schedule)
+  targetWindow.addEventListener('scroll', schedule)
   targetWindow.addEventListener('resize', schedule)
   targetWindow.addEventListener('orientationchange', schedule)
   listenToMedia()
@@ -85,12 +90,22 @@ export function syncPhoneDetailHeight(appShell: HTMLElement, thread: HTMLElement
     if (frame !== null) targetWindow.cancelAnimationFrame(frame)
     visualViewport?.removeEventListener('resize', schedule)
     visualViewport?.removeEventListener('scroll', schedule)
+    targetWindow.removeEventListener('scroll', schedule)
     targetWindow.removeEventListener('resize', schedule)
     targetWindow.removeEventListener('orientationchange', schedule)
     stopListeningToMedia()
     if (previousHeight) appShell.style.setProperty('--app-height', previousHeight)
     else appShell.style.removeProperty('--app-height')
   }
+}
+
+// The phone note box starts at one line and grows with its text until the CSS
+// max-height, then scrolls inside the box.
+export function fitNoteToText(textarea: HTMLTextAreaElement) {
+  textarea.style.height = 'auto'
+  const style = getComputedStyle(textarea)
+  const borders = (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.borderBottomWidth) || 0)
+  textarea.style.height = `${textarea.scrollHeight + borders}px`
 }
 
 function usePhoneDetailLayout() {
@@ -564,6 +579,7 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
   const deliveryCardRef = useRef<HTMLDetailsElement>(null)
   const replyToolsRef = useRef<HTMLDetailsElement>(null)
   const threadEndRef = useRef<HTMLDivElement>(null)
+  const noteRef = useRef<HTMLTextAreaElement>(null)
   const previousItemIdRef = useRef(item.id)
   const previousMessageCountRef = useRef(groupThreadMessages(item.messages || []).length)
   const wasNearBottomRef = useRef(true)
@@ -734,6 +750,13 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
     return syncPhoneDetailHeight(appShell, detailScrollRef.current)
   }, [item.id])
 
+  useLayoutEffect(() => {
+    const note = noteRef.current
+    if (!note) return
+    if (isPhoneLayout) fitNoteToText(note)
+    else note.style.removeProperty('height')
+  }, [message, isPhoneLayout, previewingMessage])
+
   useEffect(() => {
     previousItemIdRef.current = item.id
     previousMessageCountRef.current = groupedMessages.length
@@ -886,7 +909,7 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
         <div className="filter-group quick-replies" role="group" aria-label="Quick replies">{QUICK_REPLIES.map((reply) => <button type="button" key={reply} disabled={busy} onClick={() => setMessage(quickReplyDraft(reply))}>{reply}</button>)}</div>
         <div className="reply-compose-toolbar"><span>{previewingMessage ? 'Markdown preview' : 'Markdown supported'}</span><button type="button" aria-pressed={previewingMessage} onClick={() => setPreviewingMessage((value) => !value)}>Preview</button></div>
       </>}
-      <div className="reply-compose">{previewingMessage ? <div className="reply-preview" aria-label="Note preview">{message.trim() ? <Markdown source={message} /> : <p className="muted">Nothing to preview yet.</p>}</div> : <textarea aria-label="Add note" rows={isPhoneLayout ? 1 : 2} placeholder={isPhoneLayout ? 'Add a note… (⌘↵ to send)' : 'Add context or paste an attachment… (⌘↵ to send)'} value={message} onPaste={handlePaste} onKeyDown={sendOnShortcut} onChange={(event) => setMessage(event.target.value)} />}
+      <div className="reply-compose">{previewingMessage ? <div className="reply-preview" aria-label="Note preview">{message.trim() ? <Markdown source={message} /> : <p className="muted">Nothing to preview yet.</p>}</div> : <textarea ref={noteRef} aria-label="Add note" rows={isPhoneLayout ? 1 : 2} placeholder={isPhoneLayout ? 'Add a note… (⌘↵ to send)' : 'Add context or paste an attachment… (⌘↵ to send)'} value={message} onPaste={handlePaste} onKeyDown={sendOnShortcut} onChange={(event) => setMessage(event.target.value)} />}
       <AttachmentPicker compact files={attachments} disabled={busy} onAdd={addAttachments} onRemove={(index) => setAttachments((current) => current.filter((_, currentIndex) => currentIndex !== index))} /></div>
       {attachmentError && <p className="form-error">{attachmentError}</p>}
       {isPhoneLayout
