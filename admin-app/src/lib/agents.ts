@@ -1,5 +1,5 @@
 import { projectConfig } from './project-config'
-import type { ThinkingEffort } from './types'
+import type { AgentLoopRun, ThinkingEffort } from './types'
 
 // Each `efforts` list is the exact set the agent's own CLI accepts for its
 // current model, low to high — see scripts/lib/agents.js for how each list
@@ -24,6 +24,31 @@ export const DEFAULT_DEPLOY_AGENT: AgentModelToken = projectConfig.automation.de
 // The full canonical range across every model, used as a fallback when an
 // item has no assigned agent (or a legacy one) to look up a narrower menu.
 export const ALL_THINKING_EFFORTS: readonly ThinkingEffort[] = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']
+
+// The loops launch each tier's newest model (a Claude alias, the newest Codex
+// slug for the tier, Grok's CLI default), so `model` above is only the launch
+// hint. The version shown comes from the exact model ID each run recorded.
+export function modelVersion(model?: string | null): string | null {
+  if (!model) return null
+  const claude = /^claude-[a-z]+-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$/.exec(model)
+  if (claude) return claude[2] ? `${claude[1]}.${claude[2]}` : claude[1]
+  return /^(?:gpt|grok)-(\d+(?:\.\d+)*)(?:-|$)/.exec(model)?.[1] ?? null
+}
+
+// "Claude Opus" + claude-opus-5-5 → "Claude Opus 5.5"; a label that already
+// names a version ("Agent 1.3") has it replaced in place.
+export function versionedAgentLabel(label: string, model?: string | null): string {
+  const version = modelVersion(model)
+  if (!version) return label
+  return /\d+(?:\.\d+)*/.test(label) ? label.replace(/\d+(?:\.\d+)*/, version) : `${label} ${version}`
+}
+
+// The newest recorded model per agent, from runs ordered newest first.
+export function latestRunModels(runs: readonly Pick<AgentLoopRun, 'agent' | 'model'>[]): Map<string, string> {
+  const models = new Map<string, string>()
+  for (const run of runs) if (run.model && !models.has(run.agent)) models.set(run.agent, run.model)
+  return models
+}
 
 export function agentByOwner(owner?: string | null) {
   return AGENT_MODELS.find((agent) => agent.owner === owner)

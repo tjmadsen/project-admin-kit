@@ -7,6 +7,11 @@
 // opus/sonnet/fable; `grok`'s active model (grok-4.6) advertises
 // low/medium/high/xhigh only. A CLI that changes its per-model menu
 // invalidates this list until re-checked.
+//
+// `model` is what run-loop.sh launches with, not the version that runs: Claude
+// aliases and Grok's default resolve to the newest model, and Codex tiers move
+// to their newest listed slug (resolve-model.js). Each run records the exact
+// model it used.
 const AGENTS = Object.freeze({
   sol: Object.freeze({ token: 'sol', owner: 'sol-agent', family: 'codex', model: 'gpt-5.6-sol', label: 'Codex Sol', claimsUnassigned: false, efforts: Object.freeze(['low', 'medium', 'high', 'xhigh', 'max', 'ultra']) }),
   terra: Object.freeze({ token: 'terra', owner: 'terra-agent', family: 'codex', model: 'gpt-5.6-terra', label: 'Codex Terra', claimsUnassigned: false, efforts: Object.freeze(['low', 'medium', 'high', 'xhigh', 'max', 'ultra']) }),

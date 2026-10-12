@@ -147,6 +147,7 @@ async function main() {
       agent: options.agent, queue: options.queue, machineId, status: 'running',
       runnerPid: Number.isInteger(runnerPid) && runnerPid > 0 ? runnerPid : null,
       thinkingEffort: options.effort || null,
+      model: options.model || null,
       startedAt: FieldValue.serverTimestamp(), heartbeatAt: FieldValue.serverTimestamp(),
     });
     process.stdout.write(ref.id);
@@ -185,6 +186,11 @@ async function main() {
     process.stdout.write(result.asked ? 'asked' : 'not_applicable');
     return;
   }
+  if (command === 'model') {
+    if (!options.model) throw new Error('Missing --model');
+    await db.collection('agentLoopRuns').doc(runId).set({ model: options.model }, { merge: true });
+    return;
+  }
   if (command === 'heartbeat') {
     await Promise.all([heartbeatMachine(machineId), db.collection('agentLoopRuns').doc(runId).set({ heartbeatAt: FieldValue.serverTimestamp() }, { merge: true })]);
     console.log('ok'); return;
@@ -208,7 +214,7 @@ async function main() {
     }, { merge: true })]);
     console.log('ok'); return;
   }
-  throw new Error('Usage: log-run.js <configured-agent|usage|usage-unavailable|start|heartbeat|progress|finish|handoff-status|confirmation-handoff|release-claim|reap|machine-heartbeat>');
+  throw new Error('Usage: log-run.js <configured-agent|usage|usage-unavailable|start|model|heartbeat|progress|finish|handoff-status|confirmation-handoff|release-claim|reap|machine-heartbeat>');
 }
 if (require.main === module) {
   main().catch((error) => { console.error(error.message); process.exitCode = 1; });

@@ -64,4 +64,30 @@ describe('Agent Loops run history', () => {
     expect(chips.length).toBe(1)
     expect(chips[0].textContent).toBe('deploy')
   })
+
+  it('names the model version each run used instead of only the model family', () => {
+    const now = Date.now()
+    const run = (id: string, agent: string, model: string | undefined, minutesAgo: number): AgentLoopRun => ({
+      id, agent, queue: 'bug', machineId: 'mac-studio', status: 'completed', ...(model ? { model } : {}),
+      startedAt: timestamp(new Date(now - minutesAgo * 60_000)), heartbeatAt: timestamp(new Date(now - minutesAgo * 60_000)),
+      finishedAt: timestamp(new Date(now - minutesAgo * 60_000)),
+    })
+    mocks.runs = [
+      run('run-sol-new', 'sol', 'gpt-6.1-sol', 5),
+      run('run-opus', 'opus', 'claude-opus-5-5', 10),
+      run('run-sol-old', 'sol', 'gpt-5.6-sol', 60),
+      run('run-fable-legacy', 'fable', undefined, 90),
+    ]
+
+    const { container } = render(<MemoryRouter><AgentLoops /></MemoryRouter>)
+
+    const roster = [...container.querySelectorAll('.loop-roster-row strong')].map((node) => node.textContent)
+    expect(roster).toContain('Claude Opus 5.5')
+    expect(roster).toContain('Codex Sol 6.1')
+    expect(roster).toContain('Claude Fable')
+    const rows = [...container.querySelectorAll('.run-table-row .agent-name')].map((node) => node.firstChild?.nextSibling?.textContent)
+    expect(rows).toEqual(['Sol 6.1', 'Opus 5.5', 'Sol 5.6', 'Fable'])
+    expect(screen.getByRole('option', { name: 'Claude Opus 5.5' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Filter runs by model' })).toHaveTextContent('Codex Sol 6.1')
+  })
 })
