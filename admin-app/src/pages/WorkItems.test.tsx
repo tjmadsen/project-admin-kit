@@ -616,8 +616,8 @@ describe('WorkItems collaborator access', () => {
     fireEvent.change(screen.getByLabelText('Agent model'), { target: { value: 'grok-agent' } })
     expect([...screen.getByLabelText('Thinking effort').querySelectorAll('option')].map((option) => option.value)).toEqual(['low', 'medium', 'high', 'xhigh'])
 
-    fireEvent.change(screen.getByLabelText('Agent model'), { target: { value: 'muse-agent' } })
-    expect([...screen.getByLabelText('Thinking effort').querySelectorAll('option')].map((option) => option.value)).toEqual(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
+    fireEvent.change(screen.getByLabelText('Agent model'), { target: { value: 'sol-agent' } })
+    expect([...screen.getByLabelText('Thinking effort').querySelectorAll('option')].map((option) => option.value)).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
   })
 
   it('keeps an edited create draft when backdrop dismissal is rejected', () => {
@@ -775,7 +775,7 @@ describe('WorkItems collaborator access', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Linkify target' })).toBeInTheDocument())
   })
 
-  // BUG-162: every keystroke and every live snapshot used to replace each text
+  // Every keystroke and every live snapshot used to replace each text
   // node and link in the open thread, about 9,600 DOM nodes for one short note.
   it('typing a note or a live update leaves the rendered thread in place', async () => {
     const target: WorkItem = { ...item, id: 'feature-2', number: 2, title: 'Linkify target' }

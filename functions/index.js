@@ -134,7 +134,7 @@ async function recordSuppressed(notification, event, workItemPath, channel, reas
 
 // Each recipient's adminUsers/{email}.notifications preferences decide which
 // channel carries the event, and one email per item per gate is enforced by
-// notificationGateState/<item> (FR-108). Push delivery is never throttled.
+// notificationGateState/<item>. Push delivery is never throttled.
 async function deliver(notification, event, workItemPath) {
   const plan = await planDelivery({ db, notification, workItemPath });
   const deliveries = [];

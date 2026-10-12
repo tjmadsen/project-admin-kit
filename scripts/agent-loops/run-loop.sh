@@ -106,7 +106,7 @@ notify_auth_failure() {
 }
 
 # Claude writes the model its alias resolved to into the session transcript
-# once the first reply arrives; copy it onto the run record (BUG-173). Sets the
+# once the first reply arrives; copy it onto the run record. Sets the
 # caller's run_model so the lookup stops after the first hit.
 record_claude_model() {
   local found
@@ -154,7 +154,7 @@ run_once() {
       codex_model="$CODEX_MODEL"
     else
       # Run the tier's newest model; the slug above is only the fallback when
-      # the Codex catalog cannot be read (BUG-173).
+      # the Codex catalog cannot be read.
       local resolved
       resolved="$(node "$SCRIPT_DIR/resolve-model.js" codex "$AGENT_TOKEN" "$codex_bin" "$codex_model" "$codex_effort" || true)"
       [[ -n "$resolved" ]] && IFS=$'\t' read -r codex_model codex_effort <<<"$resolved"

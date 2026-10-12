@@ -17,7 +17,7 @@ const {
 const { buildNotification } = require('../lib/notifications');
 
 const adminEmail = 'owner@example.com';
-const requester = 'logan@example.com';
+const requester = 'requester@example.com';
 const base = {
   number: 108,
   title: 'Reduce Email Volume',
@@ -31,7 +31,7 @@ const base = {
 };
 
 function notification(before, after) {
-  return buildNotification({ before, after, collectionId: 'featureRequests', adminEmail, adminBaseUrl: 'https://mfl-live.com/admin' });
+  return buildNotification({ before, after, collectionId: 'featureRequests', adminEmail, adminBaseUrl: 'https://example.com/admin' });
 }
 
 const questionGate = notification(base, { ...base, status: 'blocked', waitingOn: 'human', blockedReason: 'question', messages: [{ body: 'Which option?' }] });

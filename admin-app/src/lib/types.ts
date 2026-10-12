@@ -70,7 +70,7 @@ export interface AgentLoopRun {
   activeItemId?: string
   activeCollection?: 'featureRequests' | 'bugs'
   thinkingEffort?: string
-  // The exact model ID the worker ran, e.g. claude-opus-5-5 (BUG-173).
+  // The exact model ID the worker ran, e.g. claude-opus-5-5.
   model?: string
   startedAt: unknown
   heartbeatAt: unknown
@@ -114,7 +114,7 @@ export interface AgentLoopUsage {
 }
 
 // Lifecycle notification event types emitted by functions-lifecycle; each
-// user's channel preferences are keyed by these names (FR-108).
+// user's channel preferences are keyed by these names.
 export type NotificationEventType = 'action_required' | 'deployment_failure' | 'deployment_progress' | 'final_outcome'
 export type NotificationChannel = 'email' | 'push'
 export type NotificationPreferences = Partial<Record<NotificationChannel, Partial<Record<NotificationEventType, boolean>>>>

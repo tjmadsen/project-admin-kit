@@ -64,7 +64,7 @@ type MarkdownRenderers = Pick<MarkdownProps, 'renderLink' | 'renderText'>
 // react-markdown remounts every element whose renderer changes identity, so the
 // renderers live at module level and read the caller's hooks from context.
 // Rebuilding them on each render replaced every link and text node in the open
-// thread on each keystroke and each live update (BUG-162).
+// thread on each keystroke and each live update.
 const MarkdownRenderersContext = createContext<MarkdownRenderers>({})
 
 function MarkdownLink({ node: _node, href = '', children, ...props }: ComponentProps<'a'> & ExtraProps) {

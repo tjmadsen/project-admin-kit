@@ -2,7 +2,7 @@ import type { NotificationChannel, NotificationEventType, NotificationPreference
 
 // Mirrors functions-lifecycle/lib/preferences.js: the server resolves the same
 // defaults when a user record has no stored preference, so the console shows
-// exactly what will be delivered (FR-108).
+// exactly what will be delivered.
 export const NOTIFICATION_EVENT_TYPES: NotificationEventType[] = [
   'action_required', 'deployment_failure', 'deployment_progress', 'final_outcome',
 ]
