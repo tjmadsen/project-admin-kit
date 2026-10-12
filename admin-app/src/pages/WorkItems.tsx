@@ -533,6 +533,19 @@ function NewItem({ kind, canManage, actorEmail, onClose, onCreated }: { kind: Wo
   </Modal>
 }
 
+function useSyncedDraft<T>(storedValue: T) {
+  const [draft, setDraft] = useState(storedValue)
+  const previousStoredValue = useRef(storedValue)
+
+  useEffect(() => {
+    const previous = previousStoredValue.current
+    previousStoredValue.current = storedValue
+    setDraft((current) => Object.is(current, previous) ? storedValue : current)
+  }, [storedValue])
+
+  return [draft, setDraft] as const
+}
+
 function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail, actorName, onBack, onDone, onSelectItem }: { item: WorkItem; allItems: WorkItem[]; runs: import('../lib/types').AgentLoopRun[]; unreadAtOpen: number; canManage: boolean; actorEmail: string; actorName: string; onBack: () => void; onDone: (changes: Record<string, unknown>, confirmation: string) => void; onSelectItem: (item: WorkItem) => void }) {
   const [message, setMessage] = useState('')
   const [previewingMessage, setPreviewingMessage] = useState(false)
@@ -541,9 +554,9 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [copied, setCopied] = useState(false)
-  const [prUrl, setPrUrl] = useState(item.prUrl || '')
-  const [branchName, setBranchName] = useState(item.branchName || '')
-  const [deploymentNotes, setDeploymentNotes] = useState(item.deploymentNotes || '')
+  const [prUrl, setPrUrl] = useSyncedDraft(item.prUrl || '')
+  const [branchName, setBranchName] = useSyncedDraft(item.branchName || '')
+  const [deploymentNotes, setDeploymentNotes] = useSyncedDraft(item.deploymentNotes || '')
   const [closing, setClosing] = useState(false)
   const [closeNote, setCloseNote] = useState('')
   const detailShellRef = useRef<HTMLDivElement>(null)
