@@ -1,6 +1,6 @@
 'use strict';
 
-// Per-user delivery preferences for lifecycle notifications (FR-108). Each
+// Per-user delivery preferences for lifecycle notifications. Each
 // adminUsers/{email} record may carry a `notifications` map with an `email`
 // and a `push` map of event-type booleans. Missing keys fall back to the
 // defaults below: push stays on for everything, email is limited to gate

@@ -53,7 +53,7 @@ describe('Agent Loops run history', () => {
   it('exposes each run queue to the mobile layout next to the agent name', () => {
     const now = Date.now()
     mocks.runs = [{
-      id: 'run-mobile', agent: 'sol', queue: 'deploy', machineId: 'mac-studio', status: 'running',
+      id: 'run-mobile', agent: 'sol', queue: 'deploy', machineId: 'local-mac', status: 'running',
       activeItem: 'FR-64', activeItemId: 'fr-64', activeCollection: 'featureRequests', thinkingEffort: 'high',
       startedAt: timestamp(new Date(now - 50 * 60_000)), heartbeatAt: timestamp(new Date(now - 10_000)),
     }]
@@ -68,7 +68,7 @@ describe('Agent Loops run history', () => {
   it('names the model version each run used instead of only the model family', () => {
     const now = Date.now()
     const run = (id: string, agent: string, model: string | undefined, minutesAgo: number): AgentLoopRun => ({
-      id, agent, queue: 'bug', machineId: 'mac-studio', status: 'completed', ...(model ? { model } : {}),
+      id, agent, queue: 'bug', machineId: 'local-mac', status: 'completed', ...(model ? { model } : {}),
       startedAt: timestamp(new Date(now - minutesAgo * 60_000)), heartbeatAt: timestamp(new Date(now - minutesAgo * 60_000)),
       finishedAt: timestamp(new Date(now - minutesAgo * 60_000)),
     })

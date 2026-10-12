@@ -3,7 +3,7 @@
 
 // The loops run the newest model in each tier rather than a pinned version,
 // and every run records the exact model it used so the admin console can name
-// the version (BUG-173). Claude resolves its alias (`opus`) itself and writes
+// the version. Claude resolves its alias (`opus`) itself and writes
 // the resolved ID into the session transcript. Grok runs its CLI default.
 // Codex has no "latest" alias, so pick the highest-versioned listed slug for
 // the tier (gpt-6.1-sol over gpt-6-sol and gpt-5.6-sol) from its catalog.

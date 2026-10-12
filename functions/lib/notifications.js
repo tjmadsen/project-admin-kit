@@ -44,7 +44,7 @@ function messageBody(item) {
 
 // A deployment failure alerts once per entry into the question gate. Later
 // thread messages while the item still sits at that gate are ordinary
-// progress and never re-alert (FR-108: one stuck item used to send 26 copies).
+// progress and never re-alert.
 function hasNewDeploymentFailure(before, after) {
   if (effectiveGate(after) !== 'question' || effectiveGate(before) === 'question') return false;
   const afterMessage = latestMessage(after)?.body?.trim() || '';

@@ -127,7 +127,7 @@ const catalog = (...models) => JSON.stringify({ models: models.map(([slug, effor
 })) });
 const FULL = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
 
-test('a Codex tier runs its newest listed model, not the slug it was first set up with (BUG-173)', () => {
+test('a Codex tier runs its newest listed model, not the slug it was first set up with', () => {
   const sandbox = makeSandbox();
   const { record } = runLoop(sandbox, 'sol', 'bug', {
     PROJECT_ADMIN_TEST_CODEX_CATALOG: catalog(['gpt-5.6-sol', FULL], ['gpt-6.1-sol', FULL], ['gpt-6-sol', FULL], ['gpt-7-sol', FULL, 'hide'], ['gpt-6.2-terra', FULL]),
@@ -146,7 +146,7 @@ test('a newer Codex model without the requested effort steps down instead of fai
   assert.match(record, /LOG_RUN_ARGV: .*start .*--effort max/);
 });
 
-test('a Claude run records the model its alias resolved to (BUG-173)', () => {
+test('a Claude run records the model its alias resolved to', () => {
   const sandbox = makeSandbox();
   const { status, record } = runLoop(sandbox, 'opus', 'bug', { PROJECT_ADMIN_TEST_CLAUDE_MODEL: 'claude-opus-5-5' });
   assert.equal(status, 0);
