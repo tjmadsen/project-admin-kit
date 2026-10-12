@@ -635,24 +635,32 @@ a { color: inherit; text-decoration: none; }
 .detail-reply { flex: none; padding: 9px 12px; padding-bottom: max(9px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--bg-elevated); box-shadow: 0 -5px 18px color-mix(in srgb, var(--shadow) 4%, transparent); }
 .reply-compose-toolbar { margin-bottom: 5px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .reply-compose-toolbar span { color: var(--ink-muted); font-size: var(--type-micro); font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
-.reply-compose-toolbar button { min-height: 26px; padding: 0 9px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink-muted); background: var(--panel); font-size: var(--type-caption); font-weight: 700; cursor: pointer; }
-.reply-compose-toolbar button[aria-pressed="true"] { border-color: var(--focus); color: var(--success); background: var(--success-soft); }
-.reply-compose { display: grid; grid-template-columns: minmax(0, 1fr) 172px; align-items: stretch; gap: 8px; }
+.reply-compose-toolbar button, .reply-toolbar > button { min-height: 26px; padding: 0 9px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink-muted); background: var(--panel); font-size: var(--type-caption); font-weight: 700; cursor: pointer; }
+.reply-compose-toolbar button[aria-pressed="true"], .reply-toolbar > button[aria-pressed="true"] { border-color: var(--focus); color: var(--success); background: var(--success-soft); }
+.reply-compose { display: grid; grid-template-columns: minmax(0, 1fr) 44px auto; align-items: end; gap: 8px; }
+/* One toolbar row of 32px controls above the text box, with the attach and
+   send buttons beside it, so the anchored composer leaves the thread most of the pane. */
+.reply-toolbar { margin-bottom: 7px; display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.reply-toolbar .question-choices, .reply-toolbar .quick-replies { margin: 0; }
+.reply-toolbar .question-choices .button { min-height: 32px; padding: 0 12px; font-size: var(--type-meta); }
+.reply-toolbar .quick-replies { padding: 2px; }
+.reply-toolbar .quick-replies button { min-height: 28px; }
+.reply-toolbar > button { min-height: 32px; margin-left: auto; }
+.reply-send { display: flex; gap: 7px; }
+.reply-send .button { min-height: 44px; white-space: nowrap; }
 .detail-reply textarea { width: 100%; min-height: 58px; max-height: 116px; padding: 10px 11px; resize: vertical; border: 1px solid var(--line-strong); border-radius: 7px; outline: 0; color: var(--ink-body); background: var(--panel); font-size: var(--type-control); line-height: 1.55; }
 .detail-reply textarea:focus { border-color: var(--focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 9%, transparent); }
 .reply-preview { min-height: 58px; max-height: 160px; padding: 10px 11px; overflow: auto; border: 1px solid var(--line); border-radius: 7px; color: var(--ink-body); background: var(--panel); font-size: var(--type-control); line-height: 1.55; }
-.detail-reply > div:last-child { margin-top: 6px; display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
 .quick-replies { width: fit-content; max-width: 100%; margin-bottom: 7px; }
 .question-choices { margin-bottom: 7px; display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
 .question-choices > span { color: var(--ink-muted); font-size: var(--type-meta); }
 .question-choices .button { min-height: 42px; }
 .compact-detail-reply .question-choices > span { flex-basis: 100%; }
-.attachment-picker.compact { min-width: 0; display: grid; gap: 6px; }
-.attachment-picker.compact .pending-attachments { grid-template-columns: repeat(2, minmax(58px, 1fr)); }
-.attachment-picker.compact .attachment-dropzone { min-height: 52px; height: 100%; padding: 7px 9px; grid-template-columns: 21px minmax(0, 1fr); align-content: center; place-items: center start; text-align: left; }
-.attachment-picker.compact .attachment-dropzone > span { grid-row: 1 / 3; font-size: 16px; }
-.attachment-picker.compact .attachment-dropzone strong { font-size: var(--type-micro); }
-.attachment-picker.compact .attachment-dropzone small { max-width: 100%; overflow: hidden; font-size: var(--type-micro); text-overflow: ellipsis; white-space: nowrap; }
+.attachment-picker.compact { display: contents; }
+.attachment-picker.compact .pending-attachments { grid-column: 1 / -1; grid-row: 2; grid-template-columns: repeat(auto-fill, minmax(58px, 82px)); }
+.attachment-picker.compact .attachment-dropzone { width: 44px; min-height: 44px; height: 44px; padding: 0; display: grid; grid-column: 2; grid-row: 1; place-items: center; border-style: solid; text-align: center; }
+.attachment-picker.compact .attachment-dropzone > span { grid-row: auto; font-size: 19px; }
+.attachment-picker.compact .attachment-dropzone strong, .attachment-picker.compact .attachment-dropzone small { display: none; }
 
 .markdown { min-width: 0; overflow-wrap: anywhere; }
 .markdown > :first-child { margin-top: 0; }
@@ -954,13 +962,8 @@ a { color: inherit; text-decoration: none; }
   .phone-item-actions .action-menu > div { position: static; min-width: 0; margin-top: 4px; box-shadow: none; }
   .reply-tools .quick-replies { margin-bottom: 6px; }
   .reply-tools .reply-compose-toolbar { margin: 0; }
-  .compact-detail-reply .reply-compose { grid-template-columns: minmax(0, 1fr) 44px; align-items: end; gap: 6px; }
+  .compact-detail-reply .reply-compose { grid-template-columns: minmax(0, 1fr) 44px; gap: 6px; }
   .compact-detail-reply textarea, .compact-detail-reply .reply-preview { min-height: 44px; max-height: min(148px, calc(var(--app-height, 100dvh) * .25)); padding: 8px 9px; resize: none; line-height: 1.35; }
-  .compact-detail-reply .attachment-picker.compact { display: contents; }
-  .compact-detail-reply .attachment-picker.compact .pending-attachments { grid-column: 1 / -1; grid-row: 2; grid-template-columns: repeat(auto-fill, minmax(58px, 82px)); }
-  .compact-detail-reply .attachment-picker.compact .attachment-dropzone { width: 44px; min-height: 44px; height: 44px; padding: 0; display: grid; grid-column: 2; grid-row: 1; place-items: center; border-style: solid; text-align: center; }
-  .compact-detail-reply .attachment-picker.compact .attachment-dropzone > span { grid-row: auto; font-size: 19px; }
-  .compact-detail-reply .attachment-picker.compact .attachment-dropzone strong, .compact-detail-reply .attachment-picker.compact .attachment-dropzone small { display: none; }
   .compact-detail-reply > .compact-reply-actions { margin-top: 6px; display: grid; }
   .compact-detail-reply > .compact-reply-actions .button { width: 100%; min-height: 42px; }
   .detail-field-grid, .routing-grid, .delivery-grid { grid-template-columns: 1fr; }
