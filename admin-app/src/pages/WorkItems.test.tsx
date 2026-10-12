@@ -1360,6 +1360,112 @@ describe('deployment handoff contract', () => {
   })
 })
 
+describe('question choice answers', () => {
+  const question: WorkItem = {
+    ...item, assignedTo: 'sol-agent', status: 'blocked', blockedReason: 'question',
+    messages: [{ author: 'Codex Sol', body: 'FR-1 — question: A) Keep the current workflow. B) Add a separate workflow.\nNext: reply A or B.', createdAt: null }],
+  }
+
+  it.each(['feature', 'bug'] as const)('records the selected answer and draft context before returning the %s to its agent', async (kind) => {
+    if (kind === 'bug') usePhoneDetailLayout()
+    state.data = [{ ...question, kind }]
+    window.history.replaceState({}, '', `/admin/${kind === 'feature' ? 'features?item=FR' : 'bugs?item=BUG'}-1`)
+    render(<WorkItems kind={kind} canManage actorEmail="Owner@example.com" />)
+    const choice = kind === 'feature' ? 'A' : 'B'
+    const label = choice === 'A' ? 'Keep the current workflow.' : 'Add a separate workflow.'
+    fireEvent.change(await screen.findByLabelText('Add note'), { target: { value: '  Keep the existing history.  ' } })
+    fireEvent.click(screen.getByRole('button', { name: `Choose ${choice}` }))
+
+    await waitFor(() => expect(firestore.updateDoc).toHaveBeenCalledTimes(1))
+    const [reference, payload] = firestore.updateDoc.mock.calls[0] as [any, Record<string, any>]
+    expect(reference.path).toBe(`${kind === 'feature' ? 'featureRequests' : 'bugs'}/feature-1`)
+    expect(payload).toMatchObject({ waitingOn: 'agent', status: 'in_progress', blockedReason: null, claimedBy: null, leaseExpiresAt: null })
+    expect(payload.messages.arrayUnion).toHaveLength(1)
+    expect(payload.messages.arrayUnion[0]).toMatchObject({ authorEmail: 'owner@example.com', body: `${choice}) ${label}\n\nKeep the existing history.`, imageUrls: [] })
+    expect(payload.messages.arrayUnion[0].createdAt).toBeInstanceOf(Timestamp)
+  })
+
+  it('answers a Markdown choice without typing a note or opening phone reply tools', async () => {
+    usePhoneDetailLayout()
+    state.data = [{ ...question, messages: [{ author: 'Claude Opus', body: 'Options:\n- **A)** Keep the current workflow.\n- **B)** Add a separate workflow.\n- **C)** Pause the work.\nNext: reply A, B, or C.', createdAt: null }] }]
+    window.history.replaceState({}, '', '/admin/features?item=FR-1')
+    render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose C' }))
+    await waitFor(() => expect(firestore.updateDoc).toHaveBeenCalledTimes(1))
+    expect(firestore.updateDoc.mock.calls[0][1]).toMatchObject({ waitingOn: 'agent', messages: { arrayUnion: [expect.objectContaining({ body: 'C) Pause the work.' })] } })
+  })
+
+  it('keeps a human context note from replacing the latest agent choices', async () => {
+    state.data = [{ ...question, messages: [...question.messages, { author: 'Owner', body: 'Please preserve older notes.', createdAt: null }] }]
+    render(<WorkItems kind="feature" canManage={false} actorEmail="collaborator@example.com" actorName="Casey Collaborator" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose B' }))
+    await waitFor(() => expect(firestore.updateDoc).toHaveBeenCalledTimes(1))
+    expect(firestore.updateDoc.mock.calls[0][1]).toMatchObject({ waitingOn: 'agent', messages: { arrayUnion: [expect.objectContaining({ author: 'Casey Collaborator', body: 'B) Add a separate workflow.' })] } })
+  })
+
+  it('preserves the selected filename when the agent formats an entire choice in bold', async () => {
+    state.data = [{ ...question, messages: [{ author: 'Codex Sol', body: '- **A) Use `config.json`.**\n- **B)** Keep the current settings.\nNext: reply A or B.', createdAt: null }] }]
+    render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose A' }))
+    await waitFor(() => expect(firestore.updateDoc).toHaveBeenCalledTimes(1))
+    expect(firestore.updateDoc.mock.calls[0][1]).toMatchObject({ messages: { arrayUnion: [expect.objectContaining({ body: 'A) Use config.json.' })] } })
+  })
+
+  it('does not offer stale, incomplete, or code-example choices', async () => {
+    state.data = [question]
+    const view = render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+    expect(await screen.findByRole('button', { name: 'Choose A' })).toBeInTheDocument()
+    for (const body of [
+      'Which season should I use?',
+      'A) Keep the current workflow.',
+      'A) First choice. A) Duplicate choice. B) Second choice.',
+      'Example only: `example A) first B) second`. Which season should I use?',
+      'Example only:\n```\nA) Keep the current workflow.\nB) Add a separate workflow.\n```\nWhich season should I use?',
+    ]) {
+      state.data = [{ ...question, messages: [...question.messages, { author: 'Codex Sol', body, createdAt: null }] }]
+      view.rerender(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+      expect(screen.queryByRole('group', { name: 'Question choices' })).not.toBeInTheDocument()
+    }
+  })
+
+  it('does not turn options in release, review, unassigned, or completed work into answers', async () => {
+    state.data = [question]
+    const view = render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+    expect(await screen.findByRole('button', { name: 'Choose A' })).toBeInTheDocument()
+    for (const changes of [
+      { blockedReason: 'deploy_approval', status: 'ready_for_deploy' },
+      { blockedReason: 'acceptance_review' },
+      { blockedReason: 'pr_review', status: 'in_review' },
+      { assignedTo: '' },
+      { waitingOn: 'agent', status: 'in_progress' },
+      { status: 'shipped' },
+    ]) {
+      state.data = [{ ...question, ...changes }]
+      view.rerender(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+      expect(screen.queryByRole('group', { name: 'Question choices' })).not.toBeInTheDocument()
+    }
+  })
+
+  it('disables both choices during a write and preserves the draft after a failed answer', async () => {
+    let rejectWrite!: (error: Error) => void
+    firestore.updateDoc.mockImplementationOnce(() => new Promise<undefined>((_resolve, reject) => { rejectWrite = reject }))
+    state.data = [question]
+    render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+    fireEvent.change(await screen.findByLabelText('Add note'), { target: { value: 'Context to keep' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Choose A' }))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Choose A' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: 'Choose B' })).toBeDisabled()
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Choose B' }))
+    expect(firestore.updateDoc).toHaveBeenCalledTimes(1)
+    await act(async () => rejectWrite(new Error('Answer could not be saved.')))
+    expect(screen.getByText('Answer could not be saved.')).toBeInTheDocument()
+    expect(screen.getByLabelText('Add note')).toHaveValue('Context to keep')
+    expect(screen.getByRole('button', { name: 'Choose A' })).toBeEnabled()
+  })
+})
+
 describe('one-tap approval', () => {
   it('offers the approval only on the gates that just need Project owner\'s go-ahead', () => {
     expect(canApproveAndReturn({ ...item, assignedTo: 'sol-agent', status: 'plan_review' })).toBe(true)
