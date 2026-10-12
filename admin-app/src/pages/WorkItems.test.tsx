@@ -609,6 +609,46 @@ describe('WorkItems collaborator access', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Linkify target' })).toBeInTheDocument())
   })
 
+  // BUG-162: every keystroke and every live snapshot used to replace each text
+  // node and link in the open thread, about 9,600 DOM nodes for one short note.
+  it('typing a note or a live update leaves the rendered thread in place', async () => {
+    const target: WorkItem = { ...item, id: 'feature-2', number: 2, title: 'Linkify target' }
+    const messages = [
+      { author: 'Codex Sol', body: 'Blocked on **FR-2**. See [PR #42](https://github.com/example/repo/pull/42) and https://example.com/docs.', createdAt: null },
+      { author: 'Project owner', body: 'Approved, continue with FR-2', createdAt: null },
+    ]
+    state.data = [{ ...item, messages }, target]
+    const view = render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+    fireEvent.click(await waitFor(() => {
+      const node = view.container.querySelector<HTMLElement>('[data-work-item-id="feature-1"]')
+      expect(node).not.toBeNull()
+      return node!
+    }))
+    const thread = await waitFor(() => {
+      const node = view.container.querySelector<HTMLElement>('.thread')
+      expect(node?.querySelectorAll('.thread-entry')).toHaveLength(2)
+      return node!
+    })
+    const reference = thread.querySelector('.work-item-ref-link')!
+    const link = thread.querySelector('a[href="https://github.com/example/repo/pull/42"]')!
+    const mutations: MutationRecord[] = []
+    const observer = new MutationObserver((records) => mutations.push(...records))
+    observer.observe(thread, { childList: true, subtree: true, characterData: true })
+
+    const note = screen.getByLabelText('Add note')
+    for (const draft of ['L', 'Lo', 'Loo', 'Look', 'Looks good']) fireEvent.change(note, { target: { value: draft } })
+    state.data = [{ ...item, messages, priority: 'high' }, { ...target }]
+    view.rerender(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+    await waitFor(() => expect(view.container.querySelector('.detail-title-row .priority-chip')).toHaveTextContent('high'))
+    mutations.push(...observer.takeRecords())
+    observer.disconnect()
+
+    expect(note).toHaveValue('Looks good')
+    expect(mutations.flatMap((record) => [...record.removedNodes])).toHaveLength(0)
+    expect(reference.isConnected).toBe(true)
+    expect(link.isConnected).toBe(true)
+  })
+
   it('keeps the admin base path when a bug thread links to a feature', () => {
     expect(adminWorkItemPath({ kind: 'feature', number: 98 })).toBe('/admin/features?item=FR-98')
   })
@@ -1022,6 +1062,80 @@ describe('deployment handoff contract', () => {
   it('requires all structured note sections before approval', () => {
     expect(deploymentNotesReady('Scope: Release the full affected change with enough detail for the deploy worker.\nCommands: Build and deploy the release in the documented order.\nVerification: Inspect the changed production route and revision.')).toBe(false)
     expect(deploymentNotesReady('Scope: Release the affected admin and backend surfaces in the approved pull request.\nCommands: Build admin, deploy Hosting, then deploy the named function.\nVerification: Open the production route and invoke the production callable.\nAcceptance: Complete the feature workflow and observe the expected saved result.')).toBe(true)
+  })
+
+  it('adopts a same-item deploy handoff in clean drafts without writing stale values on blur', async () => {
+    const waitingForHandoff: WorkItem = {
+      ...approvable,
+      status: 'ready_for_deploy',
+      blockedReason: 'deploy_approval',
+      prUrl: '',
+      branchName: '',
+      deploymentTargets: ['firebase_hosting'],
+      deploymentNotes: '',
+    }
+    state.data = [waitingForHandoff]
+    const view = render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+
+    expect((await screen.findAllByRole('button', { name: /Complete deploy notes/i })).length).toBeGreaterThan(0)
+
+    state.data = [{
+      ...waitingForHandoff,
+      prNumber: 42,
+      prUrl: 'https://github.com/example/repo/pull/42',
+      branchName: 'sol/bug-147',
+      deploymentNotes: validDeploymentNotes,
+    }]
+    view.rerender(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('PR URL')).toHaveValue('https://github.com/example/repo/pull/42')
+      expect(screen.getByLabelText('Branch')).toHaveValue('sol/bug-147')
+      expect(screen.getByLabelText('Deploy notes')).toHaveValue(validDeploymentNotes)
+    })
+    expect((await screen.findAllByRole('button', { name: /Approve Firebase Hosting → deploy/i })).length).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: /Complete deploy notes/i })).not.toBeInTheDocument()
+
+    fireEvent.blur(screen.getByLabelText('PR URL'))
+    fireEvent.blur(screen.getByLabelText('Branch'))
+    fireEvent.blur(screen.getByLabelText('Deploy notes'))
+    expect(firestore.updateDoc).not.toHaveBeenCalled()
+  })
+
+  it('preserves dirty delivery drafts across same-item server updates', async () => {
+    const original: WorkItem = {
+      ...approvable,
+      status: 'ready_for_deploy',
+      blockedReason: 'deploy_approval',
+      prNumber: 42,
+      prUrl: 'https://github.com/example/repo/pull/42',
+      branchName: 'sol/original',
+      deploymentTargets: ['firebase_hosting'],
+      deploymentNotes: validDeploymentNotes,
+    }
+    state.data = [original]
+    const view = render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+    await screen.findByLabelText('Deploy notes')
+
+    fireEvent.change(screen.getByLabelText('PR URL'), { target: { value: 'https://github.com/example/repo/pull/local' } })
+    fireEvent.change(screen.getByLabelText('Branch'), { target: { value: 'sol/local-edit' } })
+    fireEvent.change(screen.getByLabelText('Deploy notes'), { target: { value: 'Local deploy-note edit' } })
+    firestore.updateDoc.mockClear()
+
+    state.data = [{
+      ...original,
+      title: 'Server-updated title',
+      prUrl: 'https://github.com/example/repo/pull/43',
+      branchName: 'sol/server-update',
+      deploymentNotes: validDeploymentNotes.replaceAll('42', '43'),
+    }]
+    view.rerender(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+
+    await waitFor(() => expect(screen.getAllByText('Server-updated title').length).toBeGreaterThan(0))
+    expect(screen.getByLabelText('PR URL')).toHaveValue('https://github.com/example/repo/pull/local')
+    expect(screen.getByLabelText('Branch')).toHaveValue('sol/local-edit')
+    expect(screen.getByLabelText('Deploy notes')).toHaveValue('Local deploy-note edit')
+    expect(firestore.updateDoc).not.toHaveBeenCalled()
   })
 
   it('turns an incomplete release handoff into an explanatory preparation action', async () => {
