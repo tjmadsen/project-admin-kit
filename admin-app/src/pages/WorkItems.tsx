@@ -270,6 +270,32 @@ export function parseSeenCounts(value: string): Record<string, number> {
 function timestampValue(value: unknown) { return toDate(value)?.getTime() ?? 0 }
 function isLeaseOpen(item: WorkItem) { return !item.claimedBy || timestampValue(item.leaseExpiresAt) <= Date.now() }
 
+function localDateTime(value: unknown) {
+  const date = toDate(value)
+  if (!date) return ''
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
+}
+
+function deferredUntilTimestamp(value: string) {
+  if (!value) return null
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime()) || localDateTime(date) !== value) throw new Error('Choose a valid local date and time.')
+  return Timestamp.fromDate(date)
+}
+
+// Refresh eligibility at the next deadline even if Firestore has no new snapshot.
+function useDeferredClock(items: WorkItem[]) {
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    const current = Date.now()
+    const deadlines = items.filter((item) => item.waitingOn === 'agent').map((item) => timestampValue(item.deferredUntil)).filter((deadline) => deadline > current)
+    if (!deadlines.length) return
+    const timer = window.setTimeout(() => setTick((value) => value + 1), Math.min(Math.min(...deadlines) - current + 1, 2_147_483_647))
+    return () => window.clearTimeout(timer)
+  }, [items, tick])
+  return Date.now()
+}
+
 function sortWorkItems(items: WorkItem[], sortKey: SortKey, direction: 'asc' | 'desc') {
   const sign = direction === 'asc' ? 1 : -1
   return [...items].sort((a, b) => {
@@ -301,6 +327,7 @@ export default function WorkItems({ kind, canManage, actorEmail, actorName = can
   const primaryCollection = useCollection<WorkItem>(collections[kind])
   const relatedCollection = useCollection<WorkItem>(collections[kind === 'feature' ? 'bug' : 'feature'])
   const { data } = primaryCollection
+  const now = useDeferredClock(data)
   const { runs } = useLoopRuns(150)
   const loading = primaryCollection.loading || relatedCollection.loading
   const error = primaryCollection.error || relatedCollection.error
@@ -333,12 +360,12 @@ export default function WorkItems({ kind, canManage, actorEmail, actorName = can
   const filterValues = ['human', 'agent', 'deployer', 'hold', 'all']
   const filterCounts = useMemo(() => Object.fromEntries(filterValues.map((value) => [value, data.filter((item) => matchesFilter(item, value)).length])), [data, kind])
   const upNext = useMemo(() => {
-    const eligible = sortWorkItems(data.filter((item) => item.waitingOn === 'agent' && !terminal[kind].includes(item.status) && isLeaseOpen(item) && blockingDependencies(item, allItems).length === 0), 'priority', 'asc')
+    const eligible = sortWorkItems(data.filter((item) => item.waitingOn === 'agent' && timestampValue(item.deferredUntil) <= now && !terminal[kind].includes(item.status) && isLeaseOpen(item) && blockingDependencies(item, allItems).length === 0), 'priority', 'asc')
     return AGENT_MODELS.map((agent) => ({
       agent,
       items: eligible.filter((item) => item.assignedTo === agent.owner || (agent.claimsUnassigned && !item.assignedTo)).slice(0, 3),
     })).filter((lane) => lane.items.length > 0)
-  }, [allItems, data, kind])
+  }, [allItems, data, kind, now])
 
   const openItem = useCallback((item: WorkItem) => {
     const messageCount = item.messages?.length || 0
@@ -461,6 +488,7 @@ export default function WorkItems({ kind, canManage, actorEmail, actorName = can
             <span className="work-card-top"><small>{itemRef(kind, item.number)}</small><ActiveAgentBadge itemRef={itemRef(kind, item.number)} runs={runs} /><b className={`priority-chip ${item.priority}`}>{item.priority}</b>{effectiveGate(item) && <b className={`gate-chip ${effectiveGate(item)}`}>{gateLabel(effectiveGate(item))}</b>}<time>{formatRelative(item.updatedAt)}</time></span>
             <strong>{unread > 0 && <i className="unread-dot" aria-label="Unread messages" />}{item.title}</strong><em>{lastMessagePreview(item)}</em>
             {dependencyWaitLabel(item, allItems) && <span className="dependency-wait">{dependencyWaitLabel(item, allItems)}</span>}
+            {item.waitingOn === 'agent' && timestampValue(item.deferredUntil) > now && <span className="dependency-wait">Deferred until {toDate(item.deferredUntil)?.toLocaleString()}</span>}
             <span className="work-card-meta"><span>{ownerLabel(item.assignedTo)}</span><b className={`queue-pill ${item.waitingOn}`}>{waitingLabel(item.waitingOn)}</b>{item.prNumber && item.prUrl ? <a className="pr-pill" href={item.prUrl} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>PR #{item.prNumber}</a> : item.prNumber ? <span>PR #{item.prNumber}</span> : null}{deploymentTargetsFor(item).filter((target) => target !== 'none').length > 0 && <span>{deploymentSummary(item)}</span>}<span>{groupThreadMessages(item.messages || []).length} events</span>{unread > 0 && <b className="new-message-count">+{unread} new</b>}{item.imageUrls?.length ? <span>{item.imageUrls.length} attachments</span> : null}</span>
           </div>})}
         </div>
@@ -478,6 +506,7 @@ function NewItem({ kind, canManage, actorEmail, onClose, onCreated }: { kind: Wo
   const [description, setDescription] = useState('')
   const [priority, setPriority] = useState<Priority>('medium')
   const [routeNow, setRouteNow] = useState(false)
+  const [deferredUntil, setDeferredUntil] = useState('')
   const [owner, setOwner] = useState<Owner>(defaultOwner)
   const [effort, setEffort] = useState<ThinkingEffort>('xhigh')
   const [attachments, setAttachments] = useState<File[]>([])
@@ -485,7 +514,7 @@ function NewItem({ kind, canManage, actorEmail, onClose, onCreated }: { kind: Wo
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [draftId] = useState(() => doc(collectionRef(kind)).id)
-  const hasUnsavedChanges = title !== '' || description !== '' || priority !== 'medium' || routeNow || owner !== defaultOwner || effort !== 'xhigh' || attachments.length > 0
+  const hasUnsavedChanges = title !== '' || description !== '' || priority !== 'medium' || routeNow || deferredUntil !== '' || owner !== defaultOwner || effort !== 'xhigh' || attachments.length > 0
   const requestClose = () => {
     if (saving) return
     if (!hasUnsavedChanges || window.confirm('Discard this draft? Your changes will be lost.')) onClose()
@@ -505,6 +534,7 @@ function NewItem({ kind, canManage, actorEmail, onClose, onCreated }: { kind: Wo
     setSaving(true); setError('')
     let uploaded: UploadedAttachments | undefined
     try {
+      const deadline = canManage ? deferredUntilTimestamp(deferredUntil) : null
       uploaded = await uploadWorkAttachments(attachments, kind, draftId, actorEmail)
       const itemDoc = doc(db, collections[kind], draftId)
       await runTransaction(db, async (transaction) => {
@@ -517,6 +547,7 @@ function NewItem({ kind, canManage, actorEmail, onClose, onCreated }: { kind: Wo
           kind, number, title: title.trim(), description: description.trim(), imageUrls: uploaded?.urls || [], priority,
           status: kind === 'feature' ? 'backlog' : 'open', waitingOn: canManage && routeNow ? 'agent' : 'human', blockedReason: canManage && routeNow ? null : 'triage', assignedTo: owner,
           thinkingEffort: effort, targetMachine: projectConfig.automation.defaultMachineId, deploymentType: 'none', deploymentTargets: [], messages: [],
+          ...(deadline ? { deferredUntil: deadline } : {}),
           createdByEmail: actorEmail.toLowerCase(), createdByRole: canManage ? 'admin' : 'collaborator', createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
         })
       })
@@ -540,6 +571,8 @@ function NewItem({ kind, canManage, actorEmail, onClose, onCreated }: { kind: Wo
           <summary>Route now <span>Optional</span></summary>
           <label className="check-field"><input type="checkbox" checked={routeNow} onChange={(event) => setRouteNow(event.target.checked)} /><span><strong>Send directly to an agent</strong><small>Otherwise this starts in your review queue.</small></span></label>
           {routeNow && <div className="form-grid"><label>Agent model<OwnerSelect value={owner} onChange={setOwner} /></label><label>Thinking effort<select value={effort} onChange={(event) => setEffort(event.target.value as ThinkingEffort)}>{thinkingEffortsFor(owner, effort).map((value) => <option key={value}>{value}</option>)}</select></label></div>}
+          <label>Deferred until<input type="datetime-local" value={deferredUntil} onChange={(event) => setDeferredUntil(event.target.value)} /></label>
+          <p className="muted">Uses your local time ({Intl.DateTimeFormat().resolvedOptions().timeZone}). Queued work becomes eligible on the first agent loop after this time.</p>
         </details>
       </> : <p className="creator-form-note">Your submission defaults to {agentByToken(DEFAULT_WORK_AGENT)?.label || DEFAULT_WORK_AGENT} at xhigh and will be marked for {projectConfig.admin.ownerName} to review. After work starts, you can continue the conversation and attach more files.</p>}
       {error && <p className="form-error">{error}</p>}
@@ -572,6 +605,8 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
   const [prUrl, setPrUrl] = useSyncedDraft(item.prUrl || '')
   const [branchName, setBranchName] = useSyncedDraft(item.branchName || '')
   const [deploymentNotes, setDeploymentNotes] = useSyncedDraft(item.deploymentNotes || '')
+  const [deferredUntil, setDeferredUntil] = useSyncedDraft(localDateTime(item.deferredUntil))
+  const [savedDeferredUntil, setSavedDeferredUntil] = useSyncedDraft(localDateTime(item.deferredUntil))
   const [closing, setClosing] = useState(false)
   const [closeNote, setCloseNote] = useState('')
   const detailShellRef = useRef<HTMLDivElement>(null)
@@ -609,6 +644,22 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
     const succeeded = await patch(data)
     if (succeeded) onDone(data, confirmation)
     return succeeded
+  }
+  const saveDeferral = async (value: string) => {
+    setBusy(true); setError('')
+    try {
+      const deadline = deferredUntilTimestamp(value)
+      await runTransaction(db, async (transaction) => {
+        const snapshot = await transaction.get(itemDoc)
+        if (!snapshot.exists()) throw new Error('This item no longer exists.')
+        const current = snapshot.data() as WorkItem
+        if (!isLeaseOpen(current)) throw new Error('An agent is already working on this item. Change its deferral after the current run finishes.')
+        if (terminal[item.kind].includes(current.status)) throw new Error('Reopen this item before changing its deferral.')
+        transaction.update(itemDoc, { deferredUntil: deadline, updatedAt: serverTimestamp() })
+      })
+      setDeferredUntil(value); setSavedDeferredUntil(value)
+    } catch (err) { setError(err instanceof Error ? err.message : 'Could not save deferral.') }
+    finally { setBusy(false) }
   }
   const sentToAgentLabel = `Sent to ${agentByOwner(item.assignedTo)?.short || ownerLabel(item.assignedTo)}`
   const addMessage = async (returnToAgent = false) => {
@@ -858,11 +909,15 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
           {canManage ? <>
             <label>Agent model<OwnerSelect value={item.assignedTo || ''} onChange={(value) => void patch({ assignedTo: value, claimedBy: null, leaseExpiresAt: null })} /></label>
             <label>Thinking effort<select aria-label="Thinking effort" value={item.thinkingEffort || 'xhigh'} disabled={busy} onChange={(event) => void patch({ thinkingEffort: event.target.value })}>{thinkingEffortsFor(item.assignedTo, item.thinkingEffort).map((value) => <option key={value}>{value}</option>)}</select></label>
+            <label className="deferred-until-field">Deferred until<input type="datetime-local" value={deferredUntil} disabled={busy || isTerminal || !isLeaseOpen(item)} onChange={(event) => setDeferredUntil(event.target.value)} /></label>
+            <div className="form-actions deferral-actions"><button type="button" className="button secondary" disabled={busy || isTerminal || !isLeaseOpen(item) || deferredUntil === savedDeferredUntil} onClick={() => void saveDeferral(deferredUntil)}>Save deferral</button><button type="button" className="button secondary" disabled={busy || isTerminal || !isLeaseOpen(item) || !savedDeferredUntil} onClick={() => void saveDeferral('')}>Clear deferral</button></div>
           </> : <>
             <ReadonlyField label="Agent model" value={ownerLabel(item.assignedTo)} />
             <ReadonlyField label="Thinking effort" value={item.thinkingEffort || 'xhigh'} />
+            <ReadonlyField label="Deferred until" value={toDate(item.deferredUntil)?.toLocaleString() || 'Not deferred'} />
           </>}
         </div>
+        {canManage && <p className="muted">Deferral uses your local time ({Intl.DateTimeFormat().resolvedOptions().timeZone}). The item stays in Agent when queued, and becomes eligible on the first loop after its deadline. Active work must finish before its deadline can be changed.</p>}
       </section>
 
       <WorkItemDependencies item={item} allItems={allItems} canManage={canManage} disabled={busy} onChange={(dependsOn) => void patch({ dependsOn })} onSelectItem={onSelectItem} />
