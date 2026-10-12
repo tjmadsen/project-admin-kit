@@ -10,6 +10,19 @@ const urls = [
 ]
 
 describe('AttachmentGallery', () => {
+  it('mounts the preview at the viewport level and closes it from there', () => {
+    const view = render(<div data-testid="gallery-scroll-container"><AttachmentGallery urls={[urls[0]]} /></div>)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Attachment 1' }))
+
+    const dialog = screen.getByRole('dialog', { name: 'Image preview' })
+    expect(dialog.parentElement).toBe(document.body)
+    expect(view.container).not.toContainElement(dialog)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close image preview' }))
+    expect(screen.queryByRole('dialog', { name: 'Image preview' })).not.toBeInTheDocument()
+  })
+
   it('navigates only images by click and keyboard with clear boundary states', () => {
     render(<AttachmentGallery urls={urls} label="Gallery attachment" />)
 

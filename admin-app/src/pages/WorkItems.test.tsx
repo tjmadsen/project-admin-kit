@@ -3,6 +3,7 @@ import { Timestamp } from 'firebase/firestore'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { WorkItem } from '../lib/types'
 import { DetailBackProvider, useDetailBack } from '../components/DetailBackContext'
+import { adminWorkItemPath } from '../lib/format'
 import WorkItems, { APPROVAL_NOTE, canApproveAndReturn, closeWithoutDeploymentMode, deploymentApprovalIssue, deploymentNotesReady, deploymentSummary, effectiveGate, groupThreadMessages, lastMessagePreview, matchesItemReference, messageRole, parseSeenCounts, quickReplyDraft, stripMarkdown, syncPhoneDetailHeight, threadNearBottom, unreadMessageCount } from './WorkItems'
 
 const state = vi.hoisted(() => ({ data: [] as unknown[] }))
@@ -396,6 +397,7 @@ describe('WorkItems collaborator access', () => {
     expect(screen.getByRole('button', { name: /^Human 0$/ })).toHaveClass('active')
     expect(screen.getByRole('button', { name: /^Agent 2$/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^Deploy 0$/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Hold 0$/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^All 2$/ })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Active/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Critical/ })).not.toBeInTheDocument()
@@ -403,6 +405,18 @@ describe('WorkItems collaborator access', () => {
     expect(screen.getByText('🌍 Terra')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'FR-8' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'FR-9' })).toBeInTheDocument()
+  })
+
+  it('filters the list to on-hold items', async () => {
+    state.data = [
+      { ...item, id: 'feature-held', number: 10, title: 'Paused idea', assignedTo: 'sol-agent', waitingOn: 'hold' },
+      { ...item, id: 'feature-live', number: 11, title: 'Active idea', assignedTo: 'terra-agent', waitingOn: 'agent' },
+    ]
+    render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Hold 1$/ }))
+    expect(screen.getByRole('button', { name: /^Hold 1$/ })).toHaveClass('active')
+    expect(screen.getAllByText('Paused idea').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Active idea')).not.toBeInTheDocument()
   })
 
   it('shows why a dependent item is waiting and keeps it out of the up-next lane', async () => {
@@ -436,6 +450,48 @@ describe('WorkItems collaborator access', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: /Send directly to an agent/i }))
     expect(screen.getByLabelText('Agent model')).toHaveValue('sol-agent')
     expect(screen.getByLabelText('Thinking effort')).toHaveValue('xhigh')
+  })
+
+  it('keeps an edited create draft when backdrop dismissal is rejected', () => {
+    state.data = []
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const { container } = render(<WorkItems kind="bug" canManage actorEmail="owner@example.com" />)
+    fireEvent.click(screen.getByRole('button', { name: /New bug/i }))
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Draft title' } })
+
+    fireEvent.mouseDown(container.querySelector('.modal-backdrop')!)
+
+    expect(confirm).toHaveBeenCalledWith('Discard this draft? Your changes will be lost.')
+    expect(screen.getByLabelText('Title')).toHaveValue('Draft title')
+    expect(screen.getByRole('dialog', { name: 'New bug' })).toBeInTheDocument()
+    confirm.mockRestore()
+  })
+
+  it('closes an edited create draft when discard is confirmed', () => {
+    state.data = []
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(<WorkItems kind="bug" canManage actorEmail="owner@example.com" />)
+    fireEvent.click(screen.getByRole('button', { name: /New bug/i }))
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Unsaved details' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(confirm).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('dialog', { name: 'New bug' })).not.toBeInTheDocument()
+    confirm.mockRestore()
+  })
+
+  it('closes an untouched create form without prompting', () => {
+    state.data = []
+    const confirm = vi.spyOn(window, 'confirm')
+    render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+    fireEvent.click(screen.getByRole('button', { name: /New request/i }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+
+    expect(confirm).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog', { name: 'New feature request' })).not.toBeInTheDocument()
+    confirm.mockRestore()
   })
 
   it('accepts pasted screenshots in the create form', () => {
@@ -536,6 +592,10 @@ describe('WorkItems collaborator access', () => {
 
     fireEvent.click(references[0])
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Linkify target' })).toBeInTheDocument())
+  })
+
+  it('keeps the admin base path when a bug thread links to a feature', () => {
+    expect(adminWorkItemPath({ kind: 'feature', number: 98 })).toBe('/admin/features?item=FR-98')
   })
 
   it('previews a composer draft with the shared Markdown renderer', async () => {
