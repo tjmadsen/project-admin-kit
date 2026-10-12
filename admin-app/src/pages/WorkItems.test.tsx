@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { Timestamp } from 'firebase/firestore'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { WorkItem } from '../lib/types'
@@ -6,8 +6,20 @@ import { DetailBackProvider, useDetailBack } from '../components/DetailBackConte
 import { adminWorkItemPath } from '../lib/format'
 import WorkItems, { APPROVAL_NOTE, canApproveAndReturn, closeWithoutDeploymentMode, deploymentApprovalIssue, deploymentNotesReady, deploymentSummary, effectiveGate, groupThreadMessages, lastMessagePreview, matchesItemReference, messageRole, parseSeenCounts, quickReplyDraft, stripMarkdown, syncPhoneDetailHeight, threadNearBottom, unreadMessageCount } from './WorkItems'
 
-const state = vi.hoisted(() => ({ data: [] as unknown[] }))
-const firestore = vi.hoisted(() => ({ updateDoc: vi.fn(async (_reference: unknown, _data: Record<string, unknown>) => undefined) }))
+const state = vi.hoisted(() => ({ data: [] as unknown[], transactionData: undefined as Record<string, unknown> | null | undefined }))
+const firestore = vi.hoisted(() => ({
+  updateDoc: vi.fn(async (_reference: unknown, _data: Record<string, unknown>) => undefined),
+  transactionUpdate: vi.fn((_reference: unknown, _data: Record<string, unknown>) => undefined),
+  transactionSet: vi.fn((_reference: unknown, _data: Record<string, unknown>) => undefined),
+  runTransaction: vi.fn(async (_database: unknown, callback: (transaction: unknown) => Promise<unknown>) => callback({
+    get: async () => ({ exists: () => state.transactionData !== null, data: () => state.transactionData ?? state.data[0] ?? {} }),
+    update: (reference: unknown, data: Record<string, unknown>) => {
+      firestore.transactionUpdate(reference, data)
+      void firestore.updateDoc(reference, data)
+    },
+    set: (reference: unknown, data: Record<string, unknown>) => firestore.transactionSet(reference, data),
+  })),
+}))
 const scrollIntoView = vi.fn()
 const preferenceStore = new Map<string, string>()
 
@@ -24,6 +36,7 @@ vi.mock('firebase/firestore', async (importOriginal) => {
   return {
     ...actual,
     updateDoc: firestore.updateDoc,
+    runTransaction: firestore.runTransaction,
     arrayUnion: (...values: unknown[]) => ({ arrayUnion: values }),
     serverTimestamp: () => 'server-timestamp',
   }
@@ -101,6 +114,10 @@ afterAll(() => {
 afterEach(() => {
   firestore.updateDoc.mockReset()
   firestore.updateDoc.mockResolvedValue(undefined)
+  firestore.transactionUpdate.mockReset()
+  firestore.transactionSet.mockReset()
+  firestore.runTransaction.mockClear()
+  state.transactionData = undefined
   scrollIntoView.mockClear()
   window.localStorage.clear()
   window.history.replaceState({}, '', '/admin/features')
@@ -474,6 +491,73 @@ describe('WorkItems collaborator access', () => {
     expect(screen.getByText('🌍 Terra')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'FR-8' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'FR-9' })).toBeInTheDocument()
+  })
+
+  it.each(['feature', 'bug'] as const)('saves and clears a %s deadline without moving it out of the Agent queue', async (kind) => {
+    state.data = [{ ...item, kind, status: kind === 'feature' ? 'backlog' : 'open', waitingOn: 'agent', assignedTo: 'sol-agent' }]
+    render(<WorkItems kind={kind} canManage actorEmail="owner@example.com" />)
+    fireEvent.click(screen.getByRole('button', { name: /^Agent 1$/ }))
+    const input = await screen.findByLabelText('Deferred until')
+    fireEvent.change(input, { target: { value: '2026-10-03T17:30' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save deferral' }))
+    await waitFor(() => expect(firestore.transactionUpdate).toHaveBeenCalled())
+    const payload = firestore.transactionUpdate.mock.calls[0][1]
+    expect((payload.deferredUntil as Timestamp).toDate()).toEqual(new Date('2026-10-03T17:30'))
+    expect(Object.keys(payload).sort()).toEqual(['deferredUntil', 'updatedAt'])
+    expect(screen.getByLabelText('Deferred until')).toHaveValue('2026-10-03T17:30')
+    fireEvent.click(screen.getByRole('button', { name: 'Clear deferral' }))
+    await waitFor(() => expect(firestore.transactionUpdate.mock.calls.at(-1)?.[1]).toEqual({ deferredUntil: null, updatedAt: 'server-timestamp' }))
+    expect(screen.getByLabelText('Deferred until')).toHaveValue('')
+  })
+
+  it('refuses to defer an item that an agent claims while the form is open', async () => {
+    state.data = [{ ...item, waitingOn: 'agent', assignedTo: 'sol-agent' }]
+    render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+    fireEvent.click(screen.getByRole('button', { name: /^Agent 1$/ }))
+    fireEvent.change(await screen.findByLabelText('Deferred until'), { target: { value: '2026-10-03T17:30' } })
+    state.transactionData = { ...state.data[0] as WorkItem, claimedBy: 'sol', leaseExpiresAt: Timestamp.fromMillis(Date.now() + 60_000) }
+    fireEvent.click(screen.getByRole('button', { name: 'Save deferral' }))
+    expect(await screen.findByText(/already working on this item/i)).toBeInTheDocument()
+    expect(firestore.transactionUpdate).not.toHaveBeenCalled()
+  })
+
+  it('keeps deferred work in Agent and adds it to Up next when the deadline passes', () => {
+    vi.useFakeTimers()
+    try {
+      const now = new Date('2026-10-03T12:00:00Z')
+      vi.setSystemTime(now)
+      state.data = [{ ...item, number: 8, waitingOn: 'agent', assignedTo: 'sol-agent', deferredUntil: Timestamp.fromMillis(now.getTime() + 60_000) }]
+      render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+      fireEvent.click(screen.getByRole('button', { name: /^Agent 1$/ }))
+      expect(screen.getAllByText(item.title).length).toBeGreaterThan(0)
+      expect(screen.queryByRole('button', { name: 'FR-8' })).not.toBeInTheDocument()
+      act(() => vi.advanceTimersByTime(60_001))
+      expect(screen.getByRole('button', { name: 'FR-8' })).toBeInTheDocument()
+    } finally { vi.useRealTimers() }
+  })
+
+  it.each(['feature', 'bug'] as const)('creates a queued %s with the selected local deadline', async (kind) => {
+    state.data = []
+    render(<WorkItems kind={kind} canManage actorEmail="owner@example.com" />)
+    fireEvent.click(screen.getByRole('button', { name: kind === 'feature' ? /New request/i : /New bug/i }))
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Scheduled work' } })
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Start after the deadline.' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: /Send directly to an agent/i }))
+    fireEvent.change(screen.getByLabelText('Deferred until'), { target: { value: '2026-10-03T17:30' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create & queue' }))
+    await waitFor(() => expect(firestore.transactionSet).toHaveBeenCalledTimes(2))
+    const payload = firestore.transactionSet.mock.calls[1][1]
+    expect(payload).toMatchObject({ kind, waitingOn: 'agent', blockedReason: null })
+    expect((payload.deferredUntil as Timestamp).toDate()).toEqual(new Date('2026-10-03T17:30'))
+  })
+
+  it('shows a saved deadline to a collaborator without allowing edits', async () => {
+    state.data = [{ ...item, deferredUntil: Timestamp.fromDate(new Date('2026-10-03T17:30')) }]
+    render(<WorkItems kind="feature" canManage={false} actorEmail="collaborator@example.com" />)
+    await screen.findByLabelText('Add note')
+    expect(screen.queryByLabelText('Deferred until')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Save deferral' })).not.toBeInTheDocument()
+    expect(screen.getByText(new Date('2026-10-03T17:30').toLocaleString())).toBeInTheDocument()
   })
 
   it('filters the list to on-hold items', async () => {

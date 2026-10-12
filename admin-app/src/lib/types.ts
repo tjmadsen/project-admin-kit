@@ -24,6 +24,7 @@ export interface WorkItem {
   waitingOn: WaitingOn
   blockedReason?: ReviewGate
   dependsOn?: string[]
+  deferredUntil?: unknown
   assignedTo: Owner
   thinkingEffort: ThinkingEffort
   targetMachine: string
