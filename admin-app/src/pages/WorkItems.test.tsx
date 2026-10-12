@@ -689,6 +689,19 @@ describe('WorkItems collaborator access', () => {
     expect(screen.getByText('notes.txt')).toBeInTheDocument()
   })
 
+  it('attaches a file dropped on the note box, not only on the small attach button', async () => {
+    state.data = [item]
+    render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+    const composer = await screen.findByLabelText('Add note')
+    const file = new File(['csv'], 'players.csv', { type: 'text/csv' })
+    fireEvent.drop(composer, { dataTransfer: { types: ['Files'], files: [file] } })
+    expect(screen.getByText('players.csv')).toBeInTheDocument()
+    // A drop on the attach button inside the row must attach once, not twice.
+    const notes = new File(['txt'], 'notes.txt', { type: 'text/plain' })
+    fireEvent.drop(screen.getByLabelText('Choose attachments').closest('label')!, { dataTransfer: { types: ['Files'], files: [notes] } })
+    expect(screen.getAllByText('notes.txt')).toHaveLength(1)
+  })
+
   it('renders uploaded documents as named open or download cards', async () => {
     state.data = [{
       ...item,
@@ -1478,10 +1491,10 @@ describe('one-tap approval', () => {
     expect(canApproveAndReturn({ ...item, assignedTo: 'sol-agent', waitingOn: 'agent', status: 'in_progress' })).toBe(false)
   })
 
-  it('shows the chip in both action bars and beside the composer for a PR review', async () => {
+  it('shows the chip in both action bars, not again beside the composer, for a PR review', async () => {
     state.data = [approvable]
     render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
-    await waitFor(() => expect(screen.getAllByRole('button', { name: '✓ Approve → return to agent' })).toHaveLength(3))
+    await waitFor(() => expect(screen.getAllByRole('button', { name: '✓ Approve → return to agent' })).toHaveLength(2))
     expect(screen.queryByRole('button', { name: /Approve PR → Codex/i })).not.toBeInTheDocument()
   })
 

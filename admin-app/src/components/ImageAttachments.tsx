@@ -11,7 +11,7 @@ export function AttachmentPicker({ files, disabled, compact = false, onAdd, onRe
   }
   return <div className={`attachment-picker ${compact ? 'compact' : ''}`}>
     {files.length > 0 && <div className="pending-attachments">{files.map((file, index) => <LocalAttachment key={`${file.name}-${file.size}-${file.lastModified}-${index}`} file={file} index={index} onRemove={onRemove} />)}</div>}
-    <label className={`attachment-dropzone ${dragging ? 'dragging' : ''} ${disabled ? 'disabled' : ''}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true) }} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setDragging(false)} onDrop={drop}>
+    <label className={`attachment-dropzone ${dragging ? 'dragging' : ''} ${disabled ? 'disabled' : ''}`} title={compact ? `Attach images, PDF, CSV, or TXT · up to ${MAX_ATTACHMENT_COUNT} files · ${MAX_ATTACHMENT_MB} MB each` : undefined} onDragEnter={(event) => { event.preventDefault(); setDragging(true) }} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setDragging(false)} onDrop={drop}>
       <span>▧</span><strong>{files.length ? 'Add more attachments' : 'Drop or choose attachments'}</strong><small>Images, PDF, CSV, or TXT · up to {MAX_ATTACHMENT_COUNT} files · {MAX_ATTACHMENT_MB} MB each</small>
       <input aria-label="Choose attachments" type="file" accept={ATTACHMENT_ACCEPT} multiple disabled={disabled} onChange={(event) => { if (event.target.files) onAdd(Array.from(event.target.files)); event.target.value = '' }} />
     </label>

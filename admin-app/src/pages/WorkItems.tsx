@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { Timestamp, arrayUnion, collection, doc, runTransaction, serverTimestamp, updateDoc } from 'firebase/firestore'
 import EmptyState from '../components/EmptyState'
 import ActiveAgentBadge from '../components/ActiveAgentBadge'
@@ -857,6 +857,21 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
   const deployActionButton = (readyLabel: string) => deployApprovalReady
     ? <button type="button" className="action deploy-action" disabled={busy} onClick={() => void sendToDeploy()}>{readyLabel}</button>
     : <button type="button" className="action warning-action deploy-preparation-action" disabled={busy} aria-describedby={deployHandoffHintId} title={deployApprovalHint} onClick={prepareDeployment}>{deployPreparationLabel}</button>
+  const choiceButtons = choices.length > 0 && <div className="question-choices" role="group" aria-label="Question choices">
+    <span>Answer & return to {ownerLabel(item.assignedTo)}:</span>
+    {choices.map((choice) => <button type="button" className="button secondary" key={choice.letter} title={choice.label} disabled={busy} onClick={() => void addMessage(true, [`${choice.letter}) ${choice.label}`, message.trim()].filter(Boolean).join('\n\n'))}>Choose {choice.letter}</button>)}
+  </div>
+  const quickReplies = <div className="filter-group quick-replies" role="group" aria-label="Quick replies">{QUICK_REPLIES.map((reply) => <button type="button" key={reply} disabled={busy} onClick={() => setMessage(quickReplyDraft(reply))}>{reply}</button>)}</div>
+  const previewToggle = <button type="button" className="reply-preview-toggle" aria-pressed={previewingMessage} onClick={() => setPreviewingMessage((value) => !value)}>Preview</button>
+  // The attach button is small, so the whole compose row accepts dropped files. A drop
+  // on the button itself is already handled there and arrives here default-prevented;
+  // dragged text still falls through to the text box.
+  const draggingFiles = (event: DragEvent<HTMLDivElement>) => !event.defaultPrevented && Array.from(event.dataTransfer.types).includes('Files')
+  const dropAttachments = (event: DragEvent<HTMLDivElement>) => {
+    if (!draggingFiles(event)) return
+    event.preventDefault()
+    if (!busy) addAttachments(Array.from(event.dataTransfer.files))
+  }
   const sendOnShortcut = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || !(event.metaKey || event.ctrlKey)) return
     event.preventDefault()
@@ -976,26 +991,21 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
     </div>
 
     <form className={`detail-reply ${isPhoneLayout ? 'compact-detail-reply' : ''}`} onSubmit={(event) => { event.preventDefault(); void addMessage(false) }}>
-      {choices.length > 0 && <div className="question-choices" role="group" aria-label="Question choices">
-        <span>Answer & return to {ownerLabel(item.assignedTo)}:</span>
-        {choices.map((choice) => <button type="button" className="button secondary" key={choice.letter} title={choice.label} disabled={busy} onClick={() => void addMessage(true, [`${choice.letter}) ${choice.label}`, message.trim()].filter(Boolean).join('\n\n'))}>Choose {choice.letter}</button>)}
-      </div>}
-      {isPhoneLayout ? <details className="reply-tools" ref={replyToolsRef}><summary role="button">Reply tools <span>{canManage ? 'Item actions · ' : ''}Quick replies · Preview</span></summary><div>
-        {canManage && <section className="phone-item-actions" aria-label="Item actions"><span>Item actions</span><div className="action-bar">{actionBar}</div></section>}
-        <div className="filter-group quick-replies" role="group" aria-label="Quick replies">{QUICK_REPLIES.map((reply) => <button type="button" key={reply} disabled={busy} onClick={() => setMessage(quickReplyDraft(reply))}>{reply}</button>)}</div>
-        <div className="reply-compose-toolbar"><span>{previewingMessage ? 'Markdown preview' : 'Markdown supported'}</span><button type="button" aria-pressed={previewingMessage} onClick={() => setPreviewingMessage((value) => !value)}>Preview</button></div>
-      </div></details> : <>
-        <div className="filter-group quick-replies" role="group" aria-label="Quick replies">{QUICK_REPLIES.map((reply) => <button type="button" key={reply} disabled={busy} onClick={() => setMessage(quickReplyDraft(reply))}>{reply}</button>)}</div>
-        <div className="reply-compose-toolbar"><span>{previewingMessage ? 'Markdown preview' : 'Markdown supported'}</span><button type="button" aria-pressed={previewingMessage} onClick={() => setPreviewingMessage((value) => !value)}>Preview</button></div>
-      </>}
-      <div className="reply-compose">{previewingMessage ? <div className="reply-preview" aria-label="Note preview">{message.trim() ? <Markdown source={message} /> : <p className="muted">Nothing to preview yet.</p>}</div> : <textarea ref={noteRef} aria-label="Add note" rows={isPhoneLayout ? 1 : 2} placeholder={isPhoneLayout ? 'Add a note… (⌘↵ to send)' : 'Add context or paste an attachment… (⌘↵ to send)'} value={message} onPaste={handlePaste} onKeyDown={sendOnShortcut} onChange={(event) => setMessage(event.target.value)} />}
-      <AttachmentPicker compact files={attachments} disabled={busy} onAdd={addAttachments} onRemove={(index) => setAttachments((current) => current.filter((_, currentIndex) => currentIndex !== index))} /></div>
+      {isPhoneLayout ? <>
+        {choiceButtons}
+        <details className="reply-tools" ref={replyToolsRef}><summary role="button">Reply tools <span>{canManage ? 'Item actions · ' : ''}Quick replies · Preview</span></summary><div>
+          {canManage && <section className="phone-item-actions" aria-label="Item actions"><span>Item actions</span><div className="action-bar">{actionBar}</div></section>}
+          {quickReplies}
+          <div className="reply-compose-toolbar"><span>{previewingMessage ? 'Markdown preview' : 'Markdown supported'}</span>{previewToggle}</div>
+        </div></details>
+      </> : <div className="reply-toolbar">{choiceButtons}{quickReplies}{previewToggle}</div>}
+      <div className="reply-compose" onDragOver={(event) => { if (draggingFiles(event)) event.preventDefault() }} onDrop={dropAttachments}>{previewingMessage ? <div className="reply-preview" aria-label="Note preview">{message.trim() ? <Markdown source={message} /> : <p className="muted">Nothing to preview yet.</p>}</div> : <textarea ref={noteRef} aria-label="Add note" rows={isPhoneLayout ? 1 : 2} placeholder={isPhoneLayout ? 'Add a note… (⌘↵ to send)' : 'Add context or paste an attachment · Markdown supported · ⌘↵ to send'} value={message} onPaste={handlePaste} onKeyDown={sendOnShortcut} onChange={(event) => setMessage(event.target.value)} />}
+      <AttachmentPicker compact files={attachments} disabled={busy} onAdd={addAttachments} onRemove={(index) => setAttachments((current) => current.filter((_, currentIndex) => currentIndex !== index))} />
+      {!isPhoneLayout && <div className="reply-send"><button type="submit" className="button secondary" disabled={busy || !composerReady}>Add note</button>{canReturnToAgent && <button type="button" className="button primary" disabled={busy || !composerReady} onClick={() => void addMessage(true)}>Add & return to agent</button>}</div>}</div>
       {attachmentError && <p className="form-error">{attachmentError}</p>}
-      {isPhoneLayout
-        ? <div className="compact-reply-actions">{canReturnToAgent
-          ? <button type="button" className="button primary" disabled={busy || !composerReady} onClick={() => void addMessage(true)}>Add & return to agent</button>
-          : <button type="submit" className="button primary" disabled={busy || !composerReady}>Add note</button>}</div>
-        : <div>{showApprove && approveButton('button success')}<button type="submit" className="button secondary" disabled={busy || !composerReady}>Add note</button>{canReturnToAgent && <button type="button" className="button primary" disabled={busy || !composerReady} onClick={() => void addMessage(true)}>Add & return to agent</button>}</div>}
+      {isPhoneLayout && <div className="compact-reply-actions">{canReturnToAgent
+        ? <button type="button" className="button primary" disabled={busy || !composerReady} onClick={() => void addMessage(true)}>Add & return to agent</button>
+        : <button type="submit" className="button primary" disabled={busy || !composerReady}>Add note</button>}</div>}
     </form>
     {closing && <Modal title={`Mark ${itemRef(item.kind, item.number)} done without a deployment`} onClose={busy ? () => undefined : () => setClosing(false)}>
       <form className="form-stack" onSubmit={(event) => { event.preventDefault(); void closeWithoutDeployment() }}>
