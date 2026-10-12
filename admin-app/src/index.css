@@ -643,6 +643,10 @@ a { color: inherit; text-decoration: none; }
 .reply-preview { min-height: 58px; max-height: 160px; padding: 10px 11px; overflow: auto; border: 1px solid var(--line); border-radius: 7px; color: var(--ink-body); background: var(--panel); font-size: var(--type-control); line-height: 1.55; }
 .detail-reply > div:last-child { margin-top: 6px; display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
 .quick-replies { width: fit-content; max-width: 100%; margin-bottom: 7px; }
+.question-choices { margin-bottom: 7px; display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.question-choices > span { color: var(--ink-muted); font-size: var(--type-meta); }
+.question-choices .button { min-height: 42px; }
+.compact-detail-reply .question-choices > span { flex-basis: 100%; }
 .attachment-picker.compact { min-width: 0; display: grid; gap: 6px; }
 .attachment-picker.compact .pending-attachments { grid-template-columns: repeat(2, minmax(58px, 1fr)); }
 .attachment-picker.compact .attachment-dropzone { min-height: 52px; height: 100%; padding: 7px 9px; grid-template-columns: 21px minmax(0, 1fr); align-content: center; place-items: center start; text-align: left; }

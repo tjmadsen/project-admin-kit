@@ -185,6 +185,25 @@ export function messageRole(author: string): 'agent' | 'human' {
   return /^(Codex|Claude|Grok)\b/i.test(author.trim()) ? 'agent' : 'human'
 }
 
+function questionChoices(item: WorkItem) {
+  const latestAgent = (item.messages || []).filter((entry) => messageRole(entry.author) === 'agent').at(-1)
+  if (!latestAgent) return []
+  // Choices may be inline or a Markdown list. Ignore examples in code and the
+  // handoff instruction, and require a complete, unambiguous A/B/... sequence.
+  const body = latestAgent.body
+    .replace(/(```|~~~)[\s\S]*?\1/g, '')
+    .replace(/\*\*|__/g, '')
+    .split(/(?:^|\s)Next:\s*/i)[0]
+  const matchingBody = body.replace(/`[^`\n]*`/g, (code) => 'x'.repeat(code.length))
+  const markers = [...matchingBody.matchAll(/(?:^|\s)(?:[-*]\s+)?([A-Z])[).:]\s+/g)]
+  if (markers.length < 2 || markers.some((marker, index) => marker[1] !== String.fromCharCode(65 + index))) return []
+  const choices = markers.map((marker, index) => ({
+    letter: marker[1],
+    label: stripMarkdown(body.slice(marker.index! + marker[0].length, markers[index + 1]?.index ?? body.length)),
+  }))
+  return choices.every((choice) => choice.label) ? choices : []
+}
+
 export function deploymentSummary(item: Pick<WorkItem, 'deploymentTargets' | 'deploymentType' | 'deploymentApprovedTargets'>, approved = false) {
   const targets = deploymentTargetsFor(item, approved)
   if (targets.length > 0) return targets.map(deploymentLabel).join(' + ')
@@ -662,13 +681,13 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
     finally { setBusy(false) }
   }
   const sentToAgentLabel = `Sent to ${agentByOwner(item.assignedTo)?.short || ownerLabel(item.assignedTo)}`
-  const addMessage = async (returnToAgent = false) => {
-    if (!message.trim() && attachments.length === 0) return
+  const addMessage = async (returnToAgent = false, body = message.trim()) => {
+    if (busy || (!body && attachments.length === 0)) return
     setBusy(true); setError('')
     let uploaded: UploadedAttachments | undefined
     try {
       uploaded = await uploadWorkAttachments(attachments, item.kind, item.id, actorEmail)
-      const changes: Record<string, unknown> = { messages: arrayUnion({ author: actorName, authorEmail: actorEmail.toLowerCase(), body: message.trim(), imageUrls: uploaded.urls, createdAt: Timestamp.now() }), updatedAt: serverTimestamp() }
+      const changes: Record<string, unknown> = { messages: arrayUnion({ author: actorName, authorEmail: actorEmail.toLowerCase(), body, imageUrls: uploaded.urls, createdAt: Timestamp.now() }), updatedAt: serverTimestamp() }
       if (returnToAgent) Object.assign(changes, { waitingOn: 'agent', status: 'in_progress', blockedReason: null, leaseExpiresAt: null, claimedBy: null })
       await updateDoc(itemDoc, changes)
       setMessage(''); setAttachments([]); setAttachmentError('')
@@ -831,6 +850,7 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
   const deliverySummary = item.prNumber ? `PR #${item.prNumber}` : item.prUrl ? 'PR linked' : 'No PR yet'
   const collaboratorCanReturn = !canManage && gate !== 'triage' && gate !== 'deploy_approval' && gate !== 'acceptance_review' && item.status !== 'ready_for_deploy'
   const canReturnToAgent = item.waitingOn === 'human' && Boolean(item.assignedTo) && (canManage || collaboratorCanReturn)
+  const choices = !isTerminal && canReturnToAgent && gate === 'question' ? questionChoices(item) : []
   const showApprove = canManage && canApproveAndReturn(item)
   const composerReady = Boolean(message.trim()) || attachments.length > 0
   const approveButton = (className: string) => <button type="button" className={className} disabled={busy} onClick={() => void approveAndReturn()}>✓ Approve → return to agent</button>
@@ -956,6 +976,10 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
     </div>
 
     <form className={`detail-reply ${isPhoneLayout ? 'compact-detail-reply' : ''}`} onSubmit={(event) => { event.preventDefault(); void addMessage(false) }}>
+      {choices.length > 0 && <div className="question-choices" role="group" aria-label="Question choices">
+        <span>Answer & return to {ownerLabel(item.assignedTo)}:</span>
+        {choices.map((choice) => <button type="button" className="button secondary" key={choice.letter} title={choice.label} disabled={busy} onClick={() => void addMessage(true, [`${choice.letter}) ${choice.label}`, message.trim()].filter(Boolean).join('\n\n'))}>Choose {choice.letter}</button>)}
+      </div>}
       {isPhoneLayout ? <details className="reply-tools" ref={replyToolsRef}><summary role="button">Reply tools <span>{canManage ? 'Item actions · ' : ''}Quick replies · Preview</span></summary><div>
         {canManage && <section className="phone-item-actions" aria-label="Item actions"><span>Item actions</span><div className="action-bar">{actionBar}</div></section>}
         <div className="filter-group quick-replies" role="group" aria-label="Quick replies">{QUICK_REPLIES.map((reply) => <button type="button" key={reply} disabled={busy} onClick={() => setMessage(quickReplyDraft(reply))}>{reply}</button>)}</div>
