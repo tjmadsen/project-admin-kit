@@ -70,6 +70,11 @@ export function itemRef(kind: string, number: number) {
   return kind === 'feature' ? `FR-${number}` : `BUG-${number}`
 }
 
+export function adminWorkItemPath(item: Pick<WorkItem, 'kind' | 'number'>) {
+  const route = item.kind === 'feature' ? 'features' : 'bugs'
+  return `/admin/${route}?item=${encodeURIComponent(itemRef(item.kind, item.number))}`
+}
+
 export function matchesItemReference(item: WorkItem, reference: string | null) {
   if (!reference) return false
   const normalized = reference.trim().toLowerCase()

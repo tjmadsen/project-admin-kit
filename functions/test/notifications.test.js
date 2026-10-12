@@ -91,6 +91,24 @@ describe('lifecycle notification matrix', () => {
     assert.match(result.subject, /deployment failed/);
   });
 
+  it('alerts a deployment failure once per gate entry, not on every later message', () => {
+    const stuck = {
+      ...base,
+      status: 'blocked',
+      waitingOn: 'human',
+      blockedReason: 'question',
+      messages: [{ body: 'Firebase deployment failed: missing credential.' }],
+    };
+    const entry = notification(base, stuck);
+    assert.equal(entry.type, 'deployment_failure');
+    assert.equal(entry.gateEntered, true);
+    const repeat = notification(stuck, { ...stuck, messages: [...stuck.messages, { body: 'Deploy still failed after retry.' }] });
+    assert.equal(repeat, null);
+    const resultOnly = notification(stuck, { ...stuck, deploymentResult: 'TestFlight upload failed' });
+    assert.equal(resultOnly, null);
+  });
+
+
   it('builds an exact admin deep link for features and bugs', () => {
     const feature = notification(base, { ...base, status: 'in_review', waitingOn: 'human', blockedReason: 'pr_review', prUrl: 'https://github.com/owner/repository/pull/9' });
     assert.equal(feature.primaryUrl, 'https://example.com/admin/features?item=FR-9&gate=pr_review');

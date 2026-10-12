@@ -28,7 +28,7 @@ function makeSandbox() {
   const record = path.join(root, 'record.txt');
   const bin = path.join(root, 'bin');
 
-  for (const script of ['run-loop.sh', 'classify-run-result.js', 'confirmation-handoff.js', 'run-claims.js', 'headless-guard.py']) {
+  for (const script of ['run-loop.sh', 'classify-run-result.js', 'confirmation-handoff.js', 'run-claims.js', 'headless-guard.py', 'resolve-model.js']) {
     write(path.join(root, 'scripts/agent-loops', script), fs.readFileSync(path.join(AGENT_LOOPS, script)), 0o755);
   }
   for (const queue of ['feature', 'bug', 'deploy']) {
@@ -41,7 +41,7 @@ function makeSandbox() {
 if [[ "\${1:-}" == "-e" ]]; then exec ${REAL_NODE} "$@"; fi
 name="$(basename "\${1:-}")"
 case "$name" in
-  classify-run-result.js) exec ${REAL_NODE} "$@" ;;
+  classify-run-result.js|resolve-model.js) exec ${REAL_NODE} "$@" ;;
   log-run.js)
     echo "LOG_RUN_ARGV: $*" >> ${record}
     case "\${2:-}" in
@@ -62,11 +62,23 @@ shift 3
 exec "$@"
 `, 0o755);
 
+  // Without PROJECT_ADMIN_TEST_CODEX_CATALOG the catalog lists nothing, so the runner
+  // falls back to the registry slug.
   write(path.join(bin, 'codex'), `#!/usr/bin/env bash
+empty='{"models":[]}'
+if [[ "\${1:-}" == "debug" ]]; then echo "\${PROJECT_ADMIN_TEST_CODEX_CATALOG:-$empty}"; exit 0; fi
 { echo "CODEX_ARGV: $*"; echo "CODEX_STDIN<<"; cat; echo ">>CODEX_STDIN"; } >> ${record}
 `, 0o755);
 
+  // Like the real CLI, the stub records the model its alias resolved to in
+  // the transcript named by --session-id.
   write(path.join(bin, 'claude'), `#!/usr/bin/env bash
+session=""; previous=""
+for arg in "$@"; do [[ "$previous" == "--session-id" ]] && session="$arg"; previous="$arg"; done
+if [[ -n "$session" ]]; then
+  mkdir -p "$HOME/.claude/projects/-sandbox"
+  echo '{"type":"assistant","message":{"model":"'"\${PROJECT_ADMIN_TEST_CLAUDE_MODEL:-claude-opus-5-5}"'"}}' > "$HOME/.claude/projects/-sandbox/$session.jsonl"
+fi
 { echo "CLAUDE_CEILING: \${CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS:-unset}"
   echo "CLAUDE_ARGV: $*"
   echo "CLAUDE_STDIN<<"; cat; echo ">>CLAUDE_STDIN"; } >> ${record}
@@ -108,6 +120,38 @@ test('Codex takes the prompt on stdin with an immediate EOF and is rooted at the
   assert.match(record, /CODEX_ARGV: .*-C \S+ -$/m, 'codex reads stdin via `-` and gets an explicit -C root');
   assert.doesNotMatch(record, /CODEX_ARGV: .*bug prompt/, 'the prompt is no longer a positional argument');
   assert.match(record, /CODEX_STDIN<<\nbug prompt for sol\n>>CODEX_STDIN/, 'the prompt arrives on stdin and stdin then closes');
+});
+
+const catalog = (...models) => JSON.stringify({ models: models.map(([slug, efforts, visibility = 'list']) => ({
+  slug, visibility, supported_reasoning_levels: efforts.map((effort) => ({ effort })),
+})) });
+const FULL = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+
+test('a Codex tier runs its newest listed model, not the slug it was first set up with', () => {
+  const sandbox = makeSandbox();
+  const { record } = runLoop(sandbox, 'sol', 'bug', {
+    PROJECT_ADMIN_TEST_CODEX_CATALOG: catalog(['gpt-5.6-sol', FULL], ['gpt-6.1-sol', FULL], ['gpt-6-sol', FULL], ['gpt-7-sol', FULL, 'hide'], ['gpt-6.2-terra', FULL]),
+  });
+  assert.match(record, /CODEX_ARGV: .* -m gpt-6\.1-sol /);
+  assert.match(record, /LOG_RUN_ARGV: .*start .*--agent sol .*--model gpt-6\.1-sol/, 'the run records the version it ran');
+});
+
+test('a newer Codex model without the requested effort steps down instead of failing the launch', () => {
+  const sandbox = makeSandbox();
+  const { record } = runLoop(sandbox, 'luna', 'bug', {
+    CODEX_EFFORT: 'ultra',
+    PROJECT_ADMIN_TEST_CODEX_CATALOG: catalog(['gpt-5.6-luna', FULL.slice(0, 5)], ['gpt-6-luna', FULL.slice(0, 5)]),
+  });
+  assert.match(record, /CODEX_ARGV: .* -m gpt-6-luna -c model_reasoning_effort=max /);
+  assert.match(record, /LOG_RUN_ARGV: .*start .*--effort max/);
+});
+
+test('a Claude run records the model its alias resolved to', () => {
+  const sandbox = makeSandbox();
+  const { status, record } = runLoop(sandbox, 'opus', 'bug', { PROJECT_ADMIN_TEST_CLAUDE_MODEL: 'claude-opus-5-5' });
+  assert.equal(status, 0);
+  assert.match(record, /CLAUDE_ARGV: .*--model opus /, 'the alias stays, so a newer Opus is picked up automatically');
+  assert.match(record, /LOG_RUN_ARGV: .*log-run\.js model --run run-test-1 --model claude-opus-5-5/);
 });
 
 test('Claude keeps the prompt as an argument but runs with stdin closed', () => {

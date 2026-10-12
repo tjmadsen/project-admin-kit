@@ -105,6 +105,17 @@ notify_auth_failure() {
   "$NOTIFIER" -e 'display notification "Headless agent loops cannot authenticate. Run: claude setup-token (or codex login). Loops are idle until fixed." with title "Project Admin loops: auth expired" sound name "Basso"' >/dev/null 2>&1 || true
 }
 
+# Claude writes the model its alias resolved to into the session transcript
+# once the first reply arrives; copy it onto the run record. Sets the
+# caller's run_model so the lookup stops after the first hit.
+record_claude_model() {
+  local found
+  found="$(node "$SCRIPT_DIR/resolve-model.js" claude-session "$2" 2>/dev/null || true)"
+  [[ -n "$found" ]] || return 0
+  run_model="$found"
+  node "$SCRIPT_DIR/log-run.js" model --run "$1" --model "$found" >/dev/null 2>&1 || true
+}
+
 run_once() {
   cd "$REPO_ROOT"
   # A run killed by a signal (launchctl bootout during provision-machine.sh
@@ -113,7 +124,7 @@ run_once() {
   # claimed until the four-hour lease lapses. Sweep this machine's abandoned
   # runs before counting work so their items are claimable on this very fire.
   node "$SCRIPT_DIR/log-run.js" reap --machine "$MACHINE_ID" >/dev/null 2>&1 || true
-  local count_json work_count item_effort run_effort prompt_file prompt_text loop_run_id log_dir log_file exit_code summary classified release_reason confirmation_requested confirmation_handoff handoff_status prompt_via_stdin=0
+  local count_json work_count item_effort run_effort run_model='' claude_session='' prompt_file prompt_text loop_run_id log_dir log_file exit_code summary classified release_reason confirmation_requested confirmation_handoff handoff_status prompt_via_stdin=0
   count_json="$(count_queue)"
   work_count="$(node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).count))' <<<"$count_json")"
   item_effort="$(node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).topThinkingEffort||"medium"))' <<<"$count_json")"
@@ -134,12 +145,22 @@ run_once() {
     [[ -z "$codex_bin" && -x /Applications/Codex.app/Contents/Resources/codex ]] && codex_bin=/Applications/Codex.app/Contents/Resources/codex
     [[ -n "$codex_bin" ]] || { echo "Codex CLI not found" >&2; return 1; }
     case "$AGENT_TOKEN" in
-      sol) codex_model="${CODEX_MODEL:-gpt-5.6-sol}" ;;
-      terra) codex_model="${CODEX_MODEL:-gpt-5.6-terra}" ;;
-      luna) codex_model="${CODEX_MODEL:-gpt-5.6-luna}" ;;
+      sol) codex_model=gpt-5.6-sol ;;
+      terra) codex_model=gpt-5.6-terra ;;
+      luna) codex_model=gpt-5.6-luna ;;
     esac
     codex_effort="${CODEX_EFFORT:-$item_effort}"
+    if [[ -n "${CODEX_MODEL:-}" ]]; then
+      codex_model="$CODEX_MODEL"
+    else
+      # Run the tier's newest model; the slug above is only the fallback when
+      # the Codex catalog cannot be read.
+      local resolved
+      resolved="$(node "$SCRIPT_DIR/resolve-model.js" codex "$AGENT_TOKEN" "$codex_bin" "$codex_model" "$codex_effort" || true)"
+      [[ -n "$resolved" ]] && IFS=$'\t' read -r codex_model codex_effort <<<"$resolved"
+    fi
     run_effort="$codex_effort"
+    run_model="$codex_model"
     # `-` reads the prompt from stdin (fed below) so the CLI sees an immediate
     # EOF instead of inheriting launchd's stdin and waiting on it forever.
     prompt_via_stdin=1
@@ -152,21 +173,25 @@ run_once() {
     claude_model="${CLAUDE_MODEL:-$AGENT_TOKEN}"
     claude_effort="${CLAUDE_EFFORT:-$item_effort}"
     run_effort="$claude_effort"
+    # The alias resolves to the newest model at launch and only the session
+    # transcript names it, so fix the session ID to find that transcript.
+    claude_session="$(node -e 'console.log(require("crypto").randomUUID())')"
     guard="$SCRIPT_DIR/headless-guard.py"
     settings="{\"hooks\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"python3 $guard\"}]}]}}"
-    command_line=("$TIMEOUT_BIN" --signal=TERM --kill-after=30s "$LOOP_TIMEOUT_SECONDS" env "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=$CLAUDE_BACKGROUND_WAIT_CEILING_MS" "$claude_bin" -p --model "$claude_model" --effort "$claude_effort" --dangerously-skip-permissions --settings "$settings" "$prompt_text")
+    command_line=("$TIMEOUT_BIN" --signal=TERM --kill-after=30s "$LOOP_TIMEOUT_SECONDS" env "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=$CLAUDE_BACKGROUND_WAIT_CEILING_MS" "$claude_bin" -p --model "$claude_model" --effort "$claude_effort" --dangerously-skip-permissions --settings "$settings" --session-id "$claude_session" "$prompt_text")
   else
     local grok_bin grok_effort
     grok_bin="$(command -v grok || true)"
     [[ -n "$grok_bin" ]] || { echo "Grok CLI not found" >&2; return 1; }
     grok_effort="${GROK_EFFORT:-$item_effort}"
     run_effort="$grok_effort"
+    run_model="$(node "$SCRIPT_DIR/resolve-model.js" grok "$grok_bin" || true)"
     command_line=("$TIMEOUT_BIN" --signal=TERM --kill-after=30s "$LOOP_TIMEOUT_SECONDS" "$grok_bin" -p --reasoning-effort "$grok_effort" "$prompt_text")
   fi
 
   # `$$` is this run-loop.sh process even inside the command substitution, and
   # it is the pid the reaper checks to tell a killed run from a sleeping Mac.
-  loop_run_id="$(node "$SCRIPT_DIR/log-run.js" start --agent "$AGENT_TOKEN" --queue "$QUEUE_NAME" --machine "$MACHINE_ID" --pid $$ --effort "$run_effort")"
+  loop_run_id="$(node "$SCRIPT_DIR/log-run.js" start --agent "$AGENT_TOKEN" --queue "$QUEUE_NAME" --machine "$MACHINE_ID" --pid $$ --effort "$run_effort" --model "$run_model")"
   export PROJECT_ADMIN_AGENT_RUN_ID="$loop_run_id"
   export PROJECT_ADMIN_MACHINE_ID="$MACHINE_ID"
   log_dir="$REPO_ROOT/.agent-logs"
@@ -181,11 +206,16 @@ run_once() {
   else
     "${command_line[@]}" </dev/null > >(tee "$log_file") 2>&1 &
   fi
-  local worker_pid=$! heartbeat_seconds=0 progress_seconds=0 progress_summary
+  local worker_pid=$! heartbeat_seconds=0 progress_seconds=0 model_seconds=0 progress_summary
   while kill -0 "$worker_pid" 2>/dev/null; do
     sleep 5
     heartbeat_seconds=$((heartbeat_seconds + 5))
     progress_seconds=$((progress_seconds + 5))
+    model_seconds=$((model_seconds + 5))
+    if [[ -n "$claude_session" && -z "$run_model" ]] && (( model_seconds >= 15 )); then
+      record_claude_model "$loop_run_id" "$claude_session"
+      model_seconds=0
+    fi
     if (( progress_seconds >= PROGRESS_INTERVAL_SECONDS )); then
       progress_summary="$(tail -c 4000 "$log_file" 2>/dev/null || true)"
       [[ -n "${progress_summary//[[:space:]]/}" ]] || progress_summary="Worker active; no output has been captured yet."
@@ -199,6 +229,7 @@ run_once() {
   done
   wait "$worker_pid"
   exit_code=$?
+  [[ -n "$claude_session" && -z "$run_model" ]] && record_claude_model "$loop_run_id" "$claude_session"
   set -e
   summary="$(tail -c 6000 "$log_file" 2>/dev/null || true)"
   if [[ -z "${summary//[[:space:]]/}" ]]; then

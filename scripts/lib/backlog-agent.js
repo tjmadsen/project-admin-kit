@@ -64,6 +64,7 @@ function isLeaseOpen(data) {
   const millis = data.leaseExpiresAt?.toMillis?.() ?? 0;
   return !data.claimedBy || millis <= Date.now();
 }
+function isDeferred(data) { return (data.deferredUntil?.toMillis?.() ?? 0) > Date.now(); }
 function ownedBy(agent, data) { return data.assignedTo === agent.owner || (agent.claimsUnassigned && !data.assignedTo); }
 function machineEligible(data) { return !data.targetMachine || data.targetMachine === 'any' || data.targetMachine === MACHINE_ID; }
 function sortItems(a, b) {
@@ -167,11 +168,14 @@ async function create(flags) {
 }
 
 async function candidatesFor(agent, waitingOn = 'agent') {
-  const snapshot = await db.collection(COLLECTION).where('waitingOn', '==', waitingOn).limit(250).get();
+  const query = db.collection(COLLECTION).where('waitingOn', '==', waitingOn);
+  // Deferred items must not hide ready work beyond an arbitrary query cutoff.
+  const snapshot = await (waitingOn === 'agent' ? query : query.limit(250)).get();
   const candidates = snapshot.docs.map((document) => ({ id: document.id, documentRef: document.ref, ...document.data() }))
     .filter((data) => ACTIVE.includes(data.status))
     .filter((data) => waitingOn === 'deployer' || ownedBy(agent, data))
     .filter((data) => waitingOn !== 'deployer' || data.deploymentApprovedAt)
+    .filter((data) => waitingOn !== 'agent' || !isDeferred(data))
     .filter(machineEligible).filter(isLeaseOpen);
   const itemsById = await dependencyIndexFor(candidates);
   return filterDependencyEligibleCandidates(candidates, itemsById).sort(sortItems);
@@ -187,6 +191,7 @@ async function claim(flags, deploy = false) {
       if (!snapshot.exists) return null;
       const data = snapshot.data();
       if (data.waitingOn !== waitingOn || !ACTIVE.includes(data.status) || !isLeaseOpen(data)) return null;
+      if (!deploy && isDeferred(data)) return null;
       if (deploy && !data.deploymentApprovedAt) return null;
       if (!deploy && (!ownedBy(agent, data) || !machineEligible(data))) return null;
       if (!await dependenciesSatisfiedInTransaction(transaction, data)) return null;

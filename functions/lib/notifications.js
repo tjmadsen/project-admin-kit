@@ -42,12 +42,12 @@ function messageBody(item) {
   return body || item?.resolution?.trim() || item?.deploymentResult?.trim() || item?.description?.trim() || 'No additional details were provided.';
 }
 
+// A deployment failure alerts once per entry into the question gate. Later
+// thread messages while the item still sits at that gate are ordinary
+// progress and never re-alert.
 function hasNewDeploymentFailure(before, after) {
-  const beforeMessage = latestMessage(before)?.body?.trim() || '';
+  if (effectiveGate(after) !== 'question' || effectiveGate(before) === 'question') return false;
   const afterMessage = latestMessage(after)?.body?.trim() || '';
-  const resultChanged = (before?.deploymentResult || '') !== (after?.deploymentResult || '');
-  const messageChanged = beforeMessage !== afterMessage;
-  if (!resultChanged && !messageChanged) return false;
   const details = `${after?.deploymentResult || ''}\n${afterMessage}`;
   const deploymentContext = /(deploy|release|testflight|firebase|hosting|function|vercel|cloud run|app store)/i.test(details);
   const failureContext = /(fail|failed|failure|blocked|error|timed out|timeout|missing credential|could not|did not reach)/i.test(details);
@@ -140,6 +140,7 @@ function buildNotification({ before, after, collectionId, adminEmail, adminEmail
     kind: kindFor(collectionId),
     reference,
     gate: type === 'action_required' ? gate : null,
+    gateEntered: Boolean(gate && gate !== previousGate),
     recipients,
     subject,
     reason,

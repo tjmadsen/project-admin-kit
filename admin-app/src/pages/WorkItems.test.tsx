@@ -1,12 +1,25 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { Timestamp } from 'firebase/firestore'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { WorkItem } from '../lib/types'
 import { DetailBackProvider, useDetailBack } from '../components/DetailBackContext'
+import { adminWorkItemPath } from '../lib/format'
 import WorkItems, { APPROVAL_NOTE, canApproveAndReturn, closeWithoutDeploymentMode, deploymentApprovalIssue, deploymentNotesReady, deploymentSummary, effectiveGate, groupThreadMessages, lastMessagePreview, matchesItemReference, messageRole, parseSeenCounts, quickReplyDraft, stripMarkdown, syncPhoneDetailHeight, threadNearBottom, unreadMessageCount } from './WorkItems'
 
-const state = vi.hoisted(() => ({ data: [] as unknown[] }))
-const firestore = vi.hoisted(() => ({ updateDoc: vi.fn(async (_reference: unknown, _data: Record<string, unknown>) => undefined) }))
+const state = vi.hoisted(() => ({ data: [] as unknown[], transactionData: undefined as Record<string, unknown> | null | undefined }))
+const firestore = vi.hoisted(() => ({
+  updateDoc: vi.fn(async (_reference: unknown, _data: Record<string, unknown>) => undefined),
+  transactionUpdate: vi.fn((_reference: unknown, _data: Record<string, unknown>) => undefined),
+  transactionSet: vi.fn((_reference: unknown, _data: Record<string, unknown>) => undefined),
+  runTransaction: vi.fn(async (_database: unknown, callback: (transaction: unknown) => Promise<unknown>) => callback({
+    get: async () => ({ exists: () => state.transactionData !== null, data: () => state.transactionData ?? state.data[0] ?? {} }),
+    update: (reference: unknown, data: Record<string, unknown>) => {
+      firestore.transactionUpdate(reference, data)
+      void firestore.updateDoc(reference, data)
+    },
+    set: (reference: unknown, data: Record<string, unknown>) => firestore.transactionSet(reference, data),
+  })),
+}))
 const scrollIntoView = vi.fn()
 const preferenceStore = new Map<string, string>()
 
@@ -23,6 +36,7 @@ vi.mock('firebase/firestore', async (importOriginal) => {
   return {
     ...actual,
     updateDoc: firestore.updateDoc,
+    runTransaction: firestore.runTransaction,
     arrayUnion: (...values: unknown[]) => ({ arrayUnion: values }),
     serverTimestamp: () => 'server-timestamp',
   }
@@ -100,6 +114,10 @@ afterAll(() => {
 afterEach(() => {
   firestore.updateDoc.mockReset()
   firestore.updateDoc.mockResolvedValue(undefined)
+  firestore.transactionUpdate.mockReset()
+  firestore.transactionSet.mockReset()
+  firestore.runTransaction.mockClear()
+  state.transactionData = undefined
   scrollIntoView.mockClear()
   window.localStorage.clear()
   window.history.replaceState({}, '', '/admin/features')
@@ -342,6 +360,75 @@ describe('phone detail viewport sizing', () => {
     await waitFor(() => expect(appShell.style.getPropertyValue('--app-height')).toBe('744px'))
     cleanup()
   })
+
+  it('returns a keyboard-scrolled page to the top so the shell never sits off-screen', async () => {
+    usePhoneDetailLayout()
+    const listeners = new Map<string, EventListener>()
+    const viewport = {
+      height: 700,
+      offsetTop: 0,
+      addEventListener: vi.fn((type: string, listener: EventListener) => listeners.set(type, listener)),
+      removeEventListener: vi.fn((type: string) => listeners.delete(type)),
+    }
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport })
+    const scrollYDescriptor = Object.getOwnPropertyDescriptor(window, 'scrollY')
+    let pageOffset = 0
+    Object.defineProperty(window, 'scrollY', { configurable: true, get: () => pageOffset })
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => { pageOffset = 0; viewport.offsetTop = 0 })
+    const appShell = document.createElement('div')
+
+    const cleanup = syncPhoneDetailHeight(appShell, null)
+    await waitFor(() => expect(appShell.style.getPropertyValue('--app-height')).toBe('700px'))
+    expect(scrollTo).not.toHaveBeenCalled()
+
+    // iOS scrolls the page up to reveal the focused note box as the keyboard opens.
+    pageOffset = 380
+    viewport.height = 320
+    listeners.get('resize')?.(new Event('resize'))
+    await waitFor(() => expect(appShell.style.getPropertyValue('--app-height')).toBe('320px'))
+    expect(window.scrollY).toBe(0)
+
+    // Closing the keyboard must not leave the header cut off and a gap at the bottom.
+    viewport.offsetTop = 120
+    viewport.height = 700
+    listeners.get('resize')?.(new Event('resize'))
+    await waitFor(() => expect(appShell.style.getPropertyValue('--app-height')).toBe('700px'))
+    expect(viewport.offsetTop).toBe(0)
+
+    cleanup()
+    scrollTo.mockRestore()
+    if (scrollYDescriptor) Object.defineProperty(window, 'scrollY', scrollYDescriptor)
+  })
+})
+
+describe('phone note composer', () => {
+  const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'scrollHeight')
+
+  afterEach(() => {
+    if (scrollHeightDescriptor) Object.defineProperty(HTMLTextAreaElement.prototype, 'scrollHeight', scrollHeightDescriptor)
+  })
+
+  it('grows the note box as a long note is typed and shrinks it after sending', async () => {
+    usePhoneDetailLayout()
+    Object.defineProperty(HTMLTextAreaElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get(this: HTMLTextAreaElement) { return 16 + 22 * Math.max(1, this.value.split('\n').length) },
+    })
+    state.data = [{ ...approvable, waitingOn: 'agent', status: 'in_progress', blockedReason: undefined }]
+    window.history.replaceState({}, '', '/admin/features?item=FR-1')
+    render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+    const composer = await screen.findByLabelText('Add note')
+    const oneLine = composer.style.height
+
+    fireEvent.change(composer, { target: { value: 'First line\nsecond\nthird\nfourth' } })
+    expect(parseFloat(composer.style.height)).toBeGreaterThan(parseFloat(oneLine) || 0)
+    expect(composer.style.height).toBe('106px')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add note' }))
+    await waitFor(() => expect(firestore.updateDoc).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.getByLabelText('Add note')).toHaveValue(''))
+    expect(screen.getByLabelText('Add note').style.height).toBe('40px')
+  })
 })
 
 describe('WorkItems collaborator access', () => {
@@ -396,6 +483,7 @@ describe('WorkItems collaborator access', () => {
     expect(screen.getByRole('button', { name: /^Human 0$/ })).toHaveClass('active')
     expect(screen.getByRole('button', { name: /^Agent 2$/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^Deploy 0$/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Hold 0$/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^All 2$/ })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Active/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Critical/ })).not.toBeInTheDocument()
@@ -403,6 +491,85 @@ describe('WorkItems collaborator access', () => {
     expect(screen.getByText('🌍 Terra')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'FR-8' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'FR-9' })).toBeInTheDocument()
+  })
+
+  it.each(['feature', 'bug'] as const)('saves and clears a %s deadline without moving it out of the Agent queue', async (kind) => {
+    state.data = [{ ...item, kind, status: kind === 'feature' ? 'backlog' : 'open', waitingOn: 'agent', assignedTo: 'sol-agent' }]
+    render(<WorkItems kind={kind} canManage actorEmail="owner@example.com" />)
+    fireEvent.click(screen.getByRole('button', { name: /^Agent 1$/ }))
+    const input = await screen.findByLabelText('Deferred until')
+    fireEvent.change(input, { target: { value: '2026-10-03T17:30' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save deferral' }))
+    await waitFor(() => expect(firestore.transactionUpdate).toHaveBeenCalled())
+    const payload = firestore.transactionUpdate.mock.calls[0][1]
+    expect((payload.deferredUntil as Timestamp).toDate()).toEqual(new Date('2026-10-03T17:30'))
+    expect(Object.keys(payload).sort()).toEqual(['deferredUntil', 'updatedAt'])
+    expect(screen.getByLabelText('Deferred until')).toHaveValue('2026-10-03T17:30')
+    fireEvent.click(screen.getByRole('button', { name: 'Clear deferral' }))
+    await waitFor(() => expect(firestore.transactionUpdate.mock.calls.at(-1)?.[1]).toEqual({ deferredUntil: null, updatedAt: 'server-timestamp' }))
+    expect(screen.getByLabelText('Deferred until')).toHaveValue('')
+  })
+
+  it('refuses to defer an item that an agent claims while the form is open', async () => {
+    state.data = [{ ...item, waitingOn: 'agent', assignedTo: 'sol-agent' }]
+    render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+    fireEvent.click(screen.getByRole('button', { name: /^Agent 1$/ }))
+    fireEvent.change(await screen.findByLabelText('Deferred until'), { target: { value: '2026-10-03T17:30' } })
+    state.transactionData = { ...state.data[0] as WorkItem, claimedBy: 'sol', leaseExpiresAt: Timestamp.fromMillis(Date.now() + 60_000) }
+    fireEvent.click(screen.getByRole('button', { name: 'Save deferral' }))
+    expect(await screen.findByText(/already working on this item/i)).toBeInTheDocument()
+    expect(firestore.transactionUpdate).not.toHaveBeenCalled()
+  })
+
+  it('keeps deferred work in Agent and adds it to Up next when the deadline passes', () => {
+    vi.useFakeTimers()
+    try {
+      const now = new Date('2026-10-03T12:00:00Z')
+      vi.setSystemTime(now)
+      state.data = [{ ...item, number: 8, waitingOn: 'agent', assignedTo: 'sol-agent', deferredUntil: Timestamp.fromMillis(now.getTime() + 60_000) }]
+      render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+      fireEvent.click(screen.getByRole('button', { name: /^Agent 1$/ }))
+      expect(screen.getAllByText(item.title).length).toBeGreaterThan(0)
+      expect(screen.queryByRole('button', { name: 'FR-8' })).not.toBeInTheDocument()
+      act(() => vi.advanceTimersByTime(60_001))
+      expect(screen.getByRole('button', { name: 'FR-8' })).toBeInTheDocument()
+    } finally { vi.useRealTimers() }
+  })
+
+  it.each(['feature', 'bug'] as const)('creates a queued %s with the selected local deadline', async (kind) => {
+    state.data = []
+    render(<WorkItems kind={kind} canManage actorEmail="owner@example.com" />)
+    fireEvent.click(screen.getByRole('button', { name: kind === 'feature' ? /New request/i : /New bug/i }))
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Scheduled work' } })
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Start after the deadline.' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: /Send directly to an agent/i }))
+    fireEvent.change(screen.getByLabelText('Deferred until'), { target: { value: '2026-10-03T17:30' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create & queue' }))
+    await waitFor(() => expect(firestore.transactionSet).toHaveBeenCalledTimes(2))
+    const payload = firestore.transactionSet.mock.calls[1][1]
+    expect(payload).toMatchObject({ kind, waitingOn: 'agent', blockedReason: null })
+    expect((payload.deferredUntil as Timestamp).toDate()).toEqual(new Date('2026-10-03T17:30'))
+  })
+
+  it('shows a saved deadline to a collaborator without allowing edits', async () => {
+    state.data = [{ ...item, deferredUntil: Timestamp.fromDate(new Date('2026-10-03T17:30')) }]
+    render(<WorkItems kind="feature" canManage={false} actorEmail="collaborator@example.com" />)
+    await screen.findByLabelText('Add note')
+    expect(screen.queryByLabelText('Deferred until')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Save deferral' })).not.toBeInTheDocument()
+    expect(screen.getByText(new Date('2026-10-03T17:30').toLocaleString())).toBeInTheDocument()
+  })
+
+  it('filters the list to on-hold items', async () => {
+    state.data = [
+      { ...item, id: 'feature-held', number: 10, title: 'Paused idea', assignedTo: 'sol-agent', waitingOn: 'hold' },
+      { ...item, id: 'feature-live', number: 11, title: 'Active idea', assignedTo: 'terra-agent', waitingOn: 'agent' },
+    ]
+    render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Hold 1$/ }))
+    expect(screen.getByRole('button', { name: /^Hold 1$/ })).toHaveClass('active')
+    expect(screen.getAllByText('Paused idea').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Active idea')).not.toBeInTheDocument()
   })
 
   it('shows why a dependent item is waiting and keeps it out of the up-next lane', async () => {
@@ -428,7 +595,7 @@ describe('WorkItems collaborator access', () => {
     expect([...container.querySelectorAll('.work-list-card > strong')].map((element) => element.textContent)).toEqual(['Newer update', 'Older update'])
   })
 
-  it('defaults routed admin work to Sol with xhigh thinking', () => {
+  it('defaults routed admin work to Sol with xhigh thinking, offering Sol\'s full effort range', () => {
     state.data = []
     render(<WorkItems kind="bug" canManage actorEmail="owner@example.com" />)
     fireEvent.click(screen.getByRole('button', { name: /New bug/i }))
@@ -436,6 +603,63 @@ describe('WorkItems collaborator access', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: /Send directly to an agent/i }))
     expect(screen.getByLabelText('Agent model')).toHaveValue('sol-agent')
     expect(screen.getByLabelText('Thinking effort')).toHaveValue('xhigh')
+    expect([...screen.getByLabelText('Thinking effort').querySelectorAll('option')].map((option) => option.value)).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
+  })
+
+  it('narrows and widens the thinking-effort menu as the routed agent model changes', () => {
+    state.data = []
+    render(<WorkItems kind="bug" canManage actorEmail="owner@example.com" />)
+    fireEvent.click(screen.getByRole('button', { name: /New bug/i }))
+    fireEvent.click(screen.getByText('Route now'))
+    fireEvent.click(screen.getByRole('checkbox', { name: /Send directly to an agent/i }))
+
+    fireEvent.change(screen.getByLabelText('Agent model'), { target: { value: 'grok-agent' } })
+    expect([...screen.getByLabelText('Thinking effort').querySelectorAll('option')].map((option) => option.value)).toEqual(['low', 'medium', 'high', 'xhigh'])
+
+    fireEvent.change(screen.getByLabelText('Agent model'), { target: { value: 'sol-agent' } })
+    expect([...screen.getByLabelText('Thinking effort').querySelectorAll('option')].map((option) => option.value)).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
+  })
+
+  it('keeps an edited create draft when backdrop dismissal is rejected', () => {
+    state.data = []
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const { container } = render(<WorkItems kind="bug" canManage actorEmail="owner@example.com" />)
+    fireEvent.click(screen.getByRole('button', { name: /New bug/i }))
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Draft title' } })
+
+    fireEvent.mouseDown(container.querySelector('.modal-backdrop')!)
+
+    expect(confirm).toHaveBeenCalledWith('Discard this draft? Your changes will be lost.')
+    expect(screen.getByLabelText('Title')).toHaveValue('Draft title')
+    expect(screen.getByRole('dialog', { name: 'New bug' })).toBeInTheDocument()
+    confirm.mockRestore()
+  })
+
+  it('closes an edited create draft when discard is confirmed', () => {
+    state.data = []
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(<WorkItems kind="bug" canManage actorEmail="owner@example.com" />)
+    fireEvent.click(screen.getByRole('button', { name: /New bug/i }))
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Unsaved details' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(confirm).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('dialog', { name: 'New bug' })).not.toBeInTheDocument()
+    confirm.mockRestore()
+  })
+
+  it('closes an untouched create form without prompting', () => {
+    state.data = []
+    const confirm = vi.spyOn(window, 'confirm')
+    render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+    fireEvent.click(screen.getByRole('button', { name: /New request/i }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+
+    expect(confirm).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog', { name: 'New feature request' })).not.toBeInTheDocument()
+    confirm.mockRestore()
   })
 
   it('accepts pasted screenshots in the create form', () => {
@@ -463,6 +687,19 @@ describe('WorkItems collaborator access', () => {
     expect(screen.getByText('report.pdf')).toBeInTheDocument()
     expect(screen.getByText('players.csv')).toBeInTheDocument()
     expect(screen.getByText('notes.txt')).toBeInTheDocument()
+  })
+
+  it('attaches a file dropped on the note box, not only on the small attach button', async () => {
+    state.data = [item]
+    render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+    const composer = await screen.findByLabelText('Add note')
+    const file = new File(['csv'], 'players.csv', { type: 'text/csv' })
+    fireEvent.drop(composer, { dataTransfer: { types: ['Files'], files: [file] } })
+    expect(screen.getByText('players.csv')).toBeInTheDocument()
+    // A drop on the attach button inside the row must attach once, not twice.
+    const notes = new File(['txt'], 'notes.txt', { type: 'text/plain' })
+    fireEvent.drop(screen.getByLabelText('Choose attachments').closest('label')!, { dataTransfer: { types: ['Files'], files: [notes] } })
+    expect(screen.getAllByText('notes.txt')).toHaveLength(1)
   })
 
   it('renders uploaded documents as named open or download cards', async () => {
@@ -536,6 +773,50 @@ describe('WorkItems collaborator access', () => {
 
     fireEvent.click(references[0])
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Linkify target' })).toBeInTheDocument())
+  })
+
+  // Every keystroke and every live snapshot used to replace each text
+  // node and link in the open thread, about 9,600 DOM nodes for one short note.
+  it('typing a note or a live update leaves the rendered thread in place', async () => {
+    const target: WorkItem = { ...item, id: 'feature-2', number: 2, title: 'Linkify target' }
+    const messages = [
+      { author: 'Codex Sol', body: 'Blocked on **FR-2**. See [PR #42](https://github.com/example/repo/pull/42) and https://example.com/docs.', createdAt: null },
+      { author: 'Owner', body: 'Approved, continue with FR-2', createdAt: null },
+    ]
+    state.data = [{ ...item, messages }, target]
+    const view = render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+    fireEvent.click(await waitFor(() => {
+      const node = view.container.querySelector<HTMLElement>('[data-work-item-id="feature-1"]')
+      expect(node).not.toBeNull()
+      return node!
+    }))
+    const thread = await waitFor(() => {
+      const node = view.container.querySelector<HTMLElement>('.thread')
+      expect(node?.querySelectorAll('.thread-entry')).toHaveLength(2)
+      return node!
+    })
+    const reference = thread.querySelector('.work-item-ref-link')!
+    const link = thread.querySelector('a[href="https://github.com/example/repo/pull/42"]')!
+    const mutations: MutationRecord[] = []
+    const observer = new MutationObserver((records) => mutations.push(...records))
+    observer.observe(thread, { childList: true, subtree: true, characterData: true })
+
+    const note = screen.getByLabelText('Add note')
+    for (const draft of ['L', 'Lo', 'Loo', 'Look', 'Looks good']) fireEvent.change(note, { target: { value: draft } })
+    state.data = [{ ...item, messages, priority: 'high' }, { ...target }]
+    view.rerender(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+    await waitFor(() => expect(view.container.querySelector('.detail-title-row .priority-chip')).toHaveTextContent('high'))
+    mutations.push(...observer.takeRecords())
+    observer.disconnect()
+
+    expect(note).toHaveValue('Looks good')
+    expect(mutations.flatMap((record) => [...record.removedNodes])).toHaveLength(0)
+    expect(reference.isConnected).toBe(true)
+    expect(link.isConnected).toBe(true)
+  })
+
+  it('keeps the admin base path when a bug thread links to a feature', () => {
+    expect(adminWorkItemPath({ kind: 'feature', number: 98 })).toBe('/admin/features?item=FR-98')
   })
 
   it('previews a composer draft with the shared Markdown renderer', async () => {
@@ -949,6 +1230,80 @@ describe('deployment handoff contract', () => {
     expect(deploymentNotesReady('Scope: Release the affected admin and backend surfaces in the approved pull request.\nCommands: Build admin, deploy Hosting, then deploy the named function.\nVerification: Open the production route and invoke the production callable.\nAcceptance: Complete the feature workflow and observe the expected saved result.')).toBe(true)
   })
 
+  it('adopts a same-item deploy handoff in clean drafts without writing stale values on blur', async () => {
+    const waitingForHandoff: WorkItem = {
+      ...approvable,
+      status: 'ready_for_deploy',
+      blockedReason: 'deploy_approval',
+      prUrl: '',
+      branchName: '',
+      deploymentTargets: ['firebase_hosting'],
+      deploymentNotes: '',
+    }
+    state.data = [waitingForHandoff]
+    const view = render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+
+    expect((await screen.findAllByRole('button', { name: /Complete deploy notes/i })).length).toBeGreaterThan(0)
+
+    state.data = [{
+      ...waitingForHandoff,
+      prNumber: 42,
+      prUrl: 'https://github.com/example/repo/pull/42',
+      branchName: 'sol/bug-147',
+      deploymentNotes: validDeploymentNotes,
+    }]
+    view.rerender(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('PR URL')).toHaveValue('https://github.com/example/repo/pull/42')
+      expect(screen.getByLabelText('Branch')).toHaveValue('sol/bug-147')
+      expect(screen.getByLabelText('Deploy notes')).toHaveValue(validDeploymentNotes)
+    })
+    expect((await screen.findAllByRole('button', { name: /Approve Firebase Hosting → deploy/i })).length).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: /Complete deploy notes/i })).not.toBeInTheDocument()
+
+    fireEvent.blur(screen.getByLabelText('PR URL'))
+    fireEvent.blur(screen.getByLabelText('Branch'))
+    fireEvent.blur(screen.getByLabelText('Deploy notes'))
+    expect(firestore.updateDoc).not.toHaveBeenCalled()
+  })
+
+  it('preserves dirty delivery drafts across same-item server updates', async () => {
+    const original: WorkItem = {
+      ...approvable,
+      status: 'ready_for_deploy',
+      blockedReason: 'deploy_approval',
+      prNumber: 42,
+      prUrl: 'https://github.com/example/repo/pull/42',
+      branchName: 'sol/original',
+      deploymentTargets: ['firebase_hosting'],
+      deploymentNotes: validDeploymentNotes,
+    }
+    state.data = [original]
+    const view = render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+    await screen.findByLabelText('Deploy notes')
+
+    fireEvent.change(screen.getByLabelText('PR URL'), { target: { value: 'https://github.com/example/repo/pull/local' } })
+    fireEvent.change(screen.getByLabelText('Branch'), { target: { value: 'sol/local-edit' } })
+    fireEvent.change(screen.getByLabelText('Deploy notes'), { target: { value: 'Local deploy-note edit' } })
+    firestore.updateDoc.mockClear()
+
+    state.data = [{
+      ...original,
+      title: 'Server-updated title',
+      prUrl: 'https://github.com/example/repo/pull/43',
+      branchName: 'sol/server-update',
+      deploymentNotes: validDeploymentNotes.replaceAll('42', '43'),
+    }]
+    view.rerender(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+
+    await waitFor(() => expect(screen.getAllByText('Server-updated title').length).toBeGreaterThan(0))
+    expect(screen.getByLabelText('PR URL')).toHaveValue('https://github.com/example/repo/pull/local')
+    expect(screen.getByLabelText('Branch')).toHaveValue('sol/local-edit')
+    expect(screen.getByLabelText('Deploy notes')).toHaveValue('Local deploy-note edit')
+    expect(firestore.updateDoc).not.toHaveBeenCalled()
+  })
+
   it('turns an incomplete release handoff into an explanatory preparation action', async () => {
     state.data = [{ ...item, deploymentType: undefined, deploymentTargets: [], deploymentNotes: '' }]
     const { container } = render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
@@ -1018,6 +1373,112 @@ describe('deployment handoff contract', () => {
   })
 })
 
+describe('question choice answers', () => {
+  const question: WorkItem = {
+    ...item, assignedTo: 'sol-agent', status: 'blocked', blockedReason: 'question',
+    messages: [{ author: 'Codex Sol', body: 'FR-1 — question: A) Keep the current workflow. B) Add a separate workflow.\nNext: reply A or B.', createdAt: null }],
+  }
+
+  it.each(['feature', 'bug'] as const)('records the selected answer and draft context before returning the %s to its agent', async (kind) => {
+    if (kind === 'bug') usePhoneDetailLayout()
+    state.data = [{ ...question, kind }]
+    window.history.replaceState({}, '', `/admin/${kind === 'feature' ? 'features?item=FR' : 'bugs?item=BUG'}-1`)
+    render(<WorkItems kind={kind} canManage actorEmail="Owner@example.com" />)
+    const choice = kind === 'feature' ? 'A' : 'B'
+    const label = choice === 'A' ? 'Keep the current workflow.' : 'Add a separate workflow.'
+    fireEvent.change(await screen.findByLabelText('Add note'), { target: { value: '  Keep the existing history.  ' } })
+    fireEvent.click(screen.getByRole('button', { name: `Choose ${choice}` }))
+
+    await waitFor(() => expect(firestore.updateDoc).toHaveBeenCalledTimes(1))
+    const [reference, payload] = firestore.updateDoc.mock.calls[0] as [any, Record<string, any>]
+    expect(reference.path).toBe(`${kind === 'feature' ? 'featureRequests' : 'bugs'}/feature-1`)
+    expect(payload).toMatchObject({ waitingOn: 'agent', status: 'in_progress', blockedReason: null, claimedBy: null, leaseExpiresAt: null })
+    expect(payload.messages.arrayUnion).toHaveLength(1)
+    expect(payload.messages.arrayUnion[0]).toMatchObject({ authorEmail: 'owner@example.com', body: `${choice}) ${label}\n\nKeep the existing history.`, imageUrls: [] })
+    expect(payload.messages.arrayUnion[0].createdAt).toBeInstanceOf(Timestamp)
+  })
+
+  it('answers a Markdown choice without typing a note or opening phone reply tools', async () => {
+    usePhoneDetailLayout()
+    state.data = [{ ...question, messages: [{ author: 'Claude Opus', body: 'Options:\n- **A)** Keep the current workflow.\n- **B)** Add a separate workflow.\n- **C)** Pause the work.\nNext: reply A, B, or C.', createdAt: null }] }]
+    window.history.replaceState({}, '', '/admin/features?item=FR-1')
+    render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose C' }))
+    await waitFor(() => expect(firestore.updateDoc).toHaveBeenCalledTimes(1))
+    expect(firestore.updateDoc.mock.calls[0][1]).toMatchObject({ waitingOn: 'agent', messages: { arrayUnion: [expect.objectContaining({ body: 'C) Pause the work.' })] } })
+  })
+
+  it('keeps a human context note from replacing the latest agent choices', async () => {
+    state.data = [{ ...question, messages: [...question.messages, { author: 'Owner', body: 'Please preserve older notes.', createdAt: null }] }]
+    render(<WorkItems kind="feature" canManage={false} actorEmail="collaborator@example.com" actorName="Casey Collaborator" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose B' }))
+    await waitFor(() => expect(firestore.updateDoc).toHaveBeenCalledTimes(1))
+    expect(firestore.updateDoc.mock.calls[0][1]).toMatchObject({ waitingOn: 'agent', messages: { arrayUnion: [expect.objectContaining({ author: 'Casey Collaborator', body: 'B) Add a separate workflow.' })] } })
+  })
+
+  it('preserves the selected filename when the agent formats an entire choice in bold', async () => {
+    state.data = [{ ...question, messages: [{ author: 'Codex Sol', body: '- **A) Use `config.json`.**\n- **B)** Keep the current settings.\nNext: reply A or B.', createdAt: null }] }]
+    render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose A' }))
+    await waitFor(() => expect(firestore.updateDoc).toHaveBeenCalledTimes(1))
+    expect(firestore.updateDoc.mock.calls[0][1]).toMatchObject({ messages: { arrayUnion: [expect.objectContaining({ body: 'A) Use config.json.' })] } })
+  })
+
+  it('does not offer stale, incomplete, or code-example choices', async () => {
+    state.data = [question]
+    const view = render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+    expect(await screen.findByRole('button', { name: 'Choose A' })).toBeInTheDocument()
+    for (const body of [
+      'Which season should I use?',
+      'A) Keep the current workflow.',
+      'A) First choice. A) Duplicate choice. B) Second choice.',
+      'Example only: `example A) first B) second`. Which season should I use?',
+      'Example only:\n```\nA) Keep the current workflow.\nB) Add a separate workflow.\n```\nWhich season should I use?',
+    ]) {
+      state.data = [{ ...question, messages: [...question.messages, { author: 'Codex Sol', body, createdAt: null }] }]
+      view.rerender(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+      expect(screen.queryByRole('group', { name: 'Question choices' })).not.toBeInTheDocument()
+    }
+  })
+
+  it('does not turn options in release, review, unassigned, or completed work into answers', async () => {
+    state.data = [question]
+    const view = render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+    expect(await screen.findByRole('button', { name: 'Choose A' })).toBeInTheDocument()
+    for (const changes of [
+      { blockedReason: 'deploy_approval', status: 'ready_for_deploy' },
+      { blockedReason: 'acceptance_review' },
+      { blockedReason: 'pr_review', status: 'in_review' },
+      { assignedTo: '' },
+      { waitingOn: 'agent', status: 'in_progress' },
+      { status: 'shipped' },
+    ]) {
+      state.data = [{ ...question, ...changes }]
+      view.rerender(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+      expect(screen.queryByRole('group', { name: 'Question choices' })).not.toBeInTheDocument()
+    }
+  })
+
+  it('disables both choices during a write and preserves the draft after a failed answer', async () => {
+    let rejectWrite!: (error: Error) => void
+    firestore.updateDoc.mockImplementationOnce(() => new Promise<undefined>((_resolve, reject) => { rejectWrite = reject }))
+    state.data = [question]
+    render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+    fireEvent.change(await screen.findByLabelText('Add note'), { target: { value: 'Context to keep' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Choose A' }))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Choose A' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: 'Choose B' })).toBeDisabled()
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Choose B' }))
+    expect(firestore.updateDoc).toHaveBeenCalledTimes(1)
+    await act(async () => rejectWrite(new Error('Answer could not be saved.')))
+    expect(screen.getByText('Answer could not be saved.')).toBeInTheDocument()
+    expect(screen.getByLabelText('Add note')).toHaveValue('Context to keep')
+    expect(screen.getByRole('button', { name: 'Choose A' })).toBeEnabled()
+  })
+})
+
 describe('one-tap approval', () => {
   it('offers the approval only on the gates that just need Project owner\'s go-ahead', () => {
     expect(canApproveAndReturn({ ...item, assignedTo: 'sol-agent', status: 'plan_review' })).toBe(true)
@@ -1030,10 +1491,10 @@ describe('one-tap approval', () => {
     expect(canApproveAndReturn({ ...item, assignedTo: 'sol-agent', waitingOn: 'agent', status: 'in_progress' })).toBe(false)
   })
 
-  it('shows the chip in both action bars and beside the composer for a PR review', async () => {
+  it('shows the chip in both action bars, not again beside the composer, for a PR review', async () => {
     state.data = [approvable]
     render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
-    await waitFor(() => expect(screen.getAllByRole('button', { name: '✓ Approve → return to agent' })).toHaveLength(3))
+    await waitFor(() => expect(screen.getAllByRole('button', { name: '✓ Approve → return to agent' })).toHaveLength(2))
     expect(screen.queryByRole('button', { name: /Approve PR → Codex/i })).not.toBeInTheDocument()
   })
 

@@ -106,7 +106,7 @@ export default function WorkItemDependencies({ item, allItems, canManage, disabl
 
   return <section className="dependency-card">
     <div className="dependency-heading"><div><p className="eyebrow">Scheduling</p><h3>Dependencies</h3></div>{blockers.length > 0 ? <strong>{dependencyWaitLabel(item, allItems)}</strong> : dependencies.length > 0 ? <strong className="ready">Prerequisites complete</strong> : null}</div>
-    {dependencies.length > 0 ? <ul className="dependency-list">{dependencies.map((dependency) => <DependencyChip key={dependency.id} dependency={dependency} removable={canManage} disabled={disabled} onRemove={() => removeDependency(dependency.id)} onSelectItem={onSelectItem} />)}</ul> : <p className="muted">No prerequisites. This item can enter an agent queue immediately.</p>}
+    {dependencies.length > 0 ? <ul className="dependency-list">{dependencies.map((dependency) => <DependencyChip key={dependency.id} dependency={dependency} removable={canManage} disabled={disabled} onRemove={() => removeDependency(dependency.id)} onSelectItem={onSelectItem} />)}</ul> : <p className="muted">No prerequisites.</p>}
     {canManage && <div className="dependency-picker">
       <label>Find a prerequisite<input aria-label="Find a prerequisite" placeholder="Search FR-7, BUG-2, or a title…" value={query} disabled={disabled} onChange={(event) => { setQuery(event.target.value); setWarning('') }} /></label>
       {matches.length > 0 && <div className="dependency-results">{matches.map((candidate) => {
