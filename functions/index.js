@@ -8,6 +8,7 @@ const { onDocumentWritten } = require('firebase-functions/v2/firestore');
 const nodemailer = require('nodemailer');
 const { sendLifecycleEmail } = require('./lib/mailer');
 const { buildNotification, notificationIdFor, renderEmail } = require('./lib/notifications');
+const { planDelivery } = require('./lib/preferences');
 const { deliverIndependently, sendLifecyclePush } = require('./lib/push');
 const projectConfig = require('./project-config.json');
 
@@ -109,11 +110,55 @@ async function deliverPush(notification, event, workItemPath) {
   }
 }
 
+async function recordSuppressed(notification, event, workItemPath, channel, reason) {
+  const notificationId = `${notificationIdFor(event.id, notification.type)}${channel === 'push' ? '-push' : ''}`;
+  const reference = db.collection('notificationAttempts').doc(notificationId);
+  // A retried event whose email already went out is suppressed by the gate
+  // window on the second pass; keep the original sent record intact.
+  if ((await reference.get()).data()?.state === 'sent') return;
+  await reference.set({
+    eventId: event.id,
+    eventType: notification.type,
+    workItemPath,
+    reference: notification.reference,
+    gate: notification.gate,
+    recipients: notification.recipients,
+    subject: notification.subject,
+    provider: channel === 'push' ? 'firebase_cloud_messaging' : 'gmail_smtp',
+    state: 'suppressed',
+    suppressedReason: reason,
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
+}
+
+// Each recipient's adminUsers/{email}.notifications preferences decide which
+// channel carries the event, and one email per item per gate is enforced by
+// notificationGateState/<item> (FR-108). Push delivery is never throttled.
 async function deliver(notification, event, workItemPath) {
-  await deliverIndependently([
-    () => deliverEmail(notification, event, workItemPath),
-    () => deliverPush(notification, event, workItemPath),
-  ]);
+  const plan = await planDelivery({ db, notification, workItemPath });
+  const deliveries = [];
+  if (plan.email.length > 0) {
+    deliveries.push(async () => {
+      await deliverEmail({ ...notification, recipients: plan.email }, event, workItemPath);
+      if (plan.stateReference && plan.key) {
+        await plan.stateReference.set({
+          workItemPath,
+          reference: notification.reference,
+          gateEmails: { [plan.key]: FieldValue.serverTimestamp() },
+          updatedAt: FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
+    });
+  } else {
+    deliveries.push(() => recordSuppressed(notification, event, workItemPath, 'email', plan.suppressedReason || 'recipient_preferences'));
+  }
+  if (plan.push.length > 0) {
+    deliveries.push(() => deliverPush({ ...notification, recipients: plan.push }, event, workItemPath));
+  } else {
+    deliveries.push(() => recordSuppressed(notification, event, workItemPath, 'push', 'recipient_preferences'));
+  }
+  await deliverIndependently(deliveries);
 }
 
 function lifecycleHandler(collectionId) {
