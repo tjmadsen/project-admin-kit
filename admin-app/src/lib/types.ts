@@ -70,6 +70,8 @@ export interface AgentLoopRun {
   activeItemId?: string
   activeCollection?: 'featureRequests' | 'bugs'
   thinkingEffort?: string
+  // The exact model ID the worker ran, e.g. claude-opus-5-5 (BUG-173).
+  model?: string
   startedAt: unknown
   heartbeatAt: unknown
   progressAt?: unknown

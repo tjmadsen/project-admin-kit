@@ -4,15 +4,24 @@ The admin backlog is stored in the Firebase project selected by
 `project-admin.config.json`. Codex, Claude, and Grok share the same queue
 protocol with one selectable owner per model:
 
-| Token | Admin owner | Default runner |
+| Token | Admin owner | Runner |
 |---|---|---|
-| `sol` | `sol-agent` | Codex `gpt-5.6-sol` |
-| `terra` | `terra-agent` | Codex `gpt-5.6-terra` |
-| `luna` | `luna-agent` | Codex `gpt-5.6-luna` |
-| `opus` | `opus-agent` | Claude Opus |
-| `sonnet` | `sonnet-agent` | Claude Sonnet |
-| `fable` | `fable-agent` | Claude Fable |
-| `grok` | `grok-agent` | Grok CLI print mode |
+| `sol` | `sol-agent` | Codex, newest `gpt-*-sol` |
+| `terra` | `terra-agent` | Codex, newest `gpt-*-terra` |
+| `luna` | `luna-agent` | Codex, newest `gpt-*-luna` |
+| `opus` | `opus-agent` | Claude `--model opus` (newest Opus) |
+| `sonnet` | `sonnet-agent` | Claude `--model sonnet` (newest Sonnet) |
+| `fable` | `fable-agent` | Claude `--model fable` (newest Fable) |
+| `grok` | `grok-agent` | Grok CLI default model |
+
+Each run uses the newest model in its tier and records the exact model ID on
+its `agentLoopRuns` document, which the admin console shows as a version
+("Claude Opus 5.5", "Codex Sol 6.1"). Codex has no "latest" alias, so
+`resolve-model.js` picks the highest-versioned listed slug for the tier from
+`codex debug models` and falls back to the slug in `run-loop.sh` when the
+catalog cannot be read; `CODEX_MODEL` still pins one model for a manual run.
+Claude's alias resolves at launch, and the runner reads the resolved ID from
+the session transcript.
 
 Opus also sweeps unassigned work. Every other model claims only explicitly
 owned items. All agents respect `targetMachine`; this installation uses
