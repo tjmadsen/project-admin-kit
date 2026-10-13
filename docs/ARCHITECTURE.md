@@ -39,3 +39,15 @@ Scheduled polls run from dedicated clean worktrees. Actual feature/bug work gets
 another durable branch-backed worktree. Heartbeats and progress snapshots feed
 the dashboard. A reaper detects dead runner PIDs, freezes run duration, returns
 the exact claim to its queue, and preserves the implementation worktree.
+
+## Agents and runners
+
+The agent roster is configuration: `project-admin.config.json` `agents` (or the
+built-in default in `scripts/lib/agent-defaults.json`) defines each token,
+owner, model, and runner, and both the scripts and the console read it.
+`run-loop.sh` dispatches to a runner adapter in `scripts/agent-loops/runners/`
+through one environment contract, keeps the outer timeout and log handling
+itself, and runs an optional per-agent usage hook. Only runners that wire
+`headless-guard.py` into their CLI (today, Claude) are `guarded`; every other
+agent is flagged as unguarded in the loop log, the provisioner check, and the
+Agent Loops page. The guard is a seatbelt against accidents, not a sandbox.

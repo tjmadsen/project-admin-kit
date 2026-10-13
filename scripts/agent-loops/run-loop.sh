@@ -13,8 +13,7 @@ STATE_DIRECTORY="$(node "$REPO_ROOT/scripts/project-env.js" value STATE_DIRECTOR
 MACHINE_ID="${PROJECT_ADMIN_MACHINE_ID:-$DEFAULT_MACHINE_ID}"
 INTERVAL_SECONDS="${PROJECT_ADMIN_LOOP_INTERVAL_SECONDS:-1800}"
 PROGRESS_INTERVAL_SECONDS="${PROJECT_ADMIN_LOOP_PROGRESS_SECONDS:-900}"
-CODEX_USAGE_CAPTURE="${PROJECT_ADMIN_CODEX_USAGE_CAPTURE:-$SCRIPT_DIR/capture-codex-usage.sh}"
-CLAUDE_USAGE_CAPTURE="${PROJECT_ADMIN_CLAUDE_USAGE_CAPTURE:-$SCRIPT_DIR/capture-claude-usage.sh}"
+AGENTS_HELPER="$REPO_ROOT/scripts/lib/agents.js"
 AUTH_ALERT_STAMP="${PROJECT_ADMIN_LOOP_AUTH_STAMP:-$HOME/$STATE_DIRECTORY/loop-auth-alert.stamp}"
 AUTH_ALERT_DEBOUNCE_SECONDS="${PROJECT_ADMIN_LOOP_AUTH_DEBOUNCE_SECONDS:-1800}"
 NOTIFIER="${PROJECT_ADMIN_LOOP_NOTIFIER:-osascript}"
@@ -41,7 +40,9 @@ else
 fi
 
 usage() {
-  echo "Usage: $0 <sol|terra|luna|opus|sonnet|fable|grok|configured> <feature|bug|deploy> [--once|interval-seconds]" >&2
+  local tokens
+  tokens="$(node "$AGENTS_HELPER" tokens --separator '|' 2>/dev/null || true)"
+  echo "Usage: $0 <${tokens:-agent}|configured> <feature|bug|deploy> [--once|interval-seconds]" >&2
   exit 2
 }
 
@@ -52,7 +53,13 @@ if [[ "$REQUESTED_AGENT" == "configured" ]]; then
   [[ "$QUEUE_NAME" == "deploy" ]] || usage
   AGENT_TOKEN="$(node "$SCRIPT_DIR/log-run.js" configured-agent --queue deploy)"
 fi
-[[ "$AGENT_TOKEN" =~ ^(sol|terra|luna|opus|sonnet|fable|grok)$ ]] || usage
+# The configured roster (project-admin.config.json `agents`) decides which
+# tokens exist and which runner adapter each one uses. The helper prints
+# shell-quoted PA_* assignments, canonicalizing aliases such as codex -> terra.
+AGENT_FIELDS="$(node "$AGENTS_HELPER" resolve "$AGENT_TOKEN")" || usage
+eval "$AGENT_FIELDS"
+AGENT_TOKEN="$PA_AGENT_TOKEN"
+RUNNER_ADAPTER="$SCRIPT_DIR/runners/$PA_RUNNER.sh"
 # machine-roster.json is enforcing, not descriptive: a hand-copied or stale
 # launchd plist must never poll a queue this host is no longer entitled to run.
 if ! node "$SCRIPT_DIR/roster-check.js" "$MACHINE_ID" "$QUEUE_NAME" "$AGENT_TOKEN"; then
@@ -62,6 +69,18 @@ fi
 if [[ "$RUN_MODE" != "--once" ]]; then
   [[ "$RUN_MODE" =~ ^[0-9]+$ ]] || usage
   INTERVAL_SECONDS="$RUN_MODE"
+fi
+# Only adapters that wire headless-guard.py into their CLI are guarded. Say so
+# up front, once per launch, so an unguarded runner is never silent about it.
+if [[ "$PA_GUARDED" != "1" ]]; then
+  echo "run-loop: WARNING $AGENT_TOKEN uses the $PA_RUNNER runner, which does not enforce headless-guard.py; destructive shell commands are not blocked${PA_SANDBOX:+ (sandbox: $PA_SANDBOX)}" >&2
+fi
+# Usage capture is an optional per-agent hook (runner default, or the agent's
+# `usage` config). PROJECT_ADMIN_<PROVIDER>_USAGE_CAPTURE overrides its script.
+USAGE_CAPTURE=""
+if [[ -n "$PA_USAGE_PROVIDER" ]]; then
+  usage_override="PROJECT_ADMIN_$(tr 'a-z-' 'A-Z_' <<<"$PA_USAGE_PROVIDER")_USAGE_CAPTURE"
+  USAGE_CAPTURE="${!usage_override:-$PA_USAGE_SCRIPT}"
 fi
 
 TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
@@ -83,11 +102,8 @@ count_queue() {
 }
 
 capture_usage() {
-  if [[ "$AGENT_TOKEN" =~ ^(sol|terra|luna)$ ]]; then
-    "$CODEX_USAGE_CAPTURE" >/dev/null 2>&1 || true
-  elif [[ "$AGENT_TOKEN" =~ ^(opus|sonnet|fable)$ ]]; then
-    "$CLAUDE_USAGE_CAPTURE" >/dev/null 2>&1 || true
-  fi
+  [[ -n "$USAGE_CAPTURE" ]] || return 0
+  PA_USAGE_PROVIDER="$PA_USAGE_PROVIDER" "$USAGE_CAPTURE" >/dev/null 2>&1 || true
 }
 
 # One macOS notification per debounce window, shared by every concurrent loop,
@@ -113,7 +129,7 @@ run_once() {
   # claimed until the four-hour lease lapses. Sweep this machine's abandoned
   # runs before counting work so their items are claimable on this very fire.
   node "$SCRIPT_DIR/log-run.js" reap --machine "$MACHINE_ID" >/dev/null 2>&1 || true
-  local count_json work_count item_effort run_effort prompt_file prompt_text loop_run_id log_dir log_file exit_code summary classified release_reason confirmation_requested confirmation_handoff handoff_status prompt_via_stdin=0
+  local count_json work_count item_effort run_effort run_model prompt_template prompt_file loop_run_id log_dir log_file exit_code summary classified release_reason confirmation_requested confirmation_handoff handoff_status
   count_json="$(count_queue)"
   work_count="$(node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).count))' <<<"$count_json")"
   item_effort="$(node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).topThinkingEffort||"medium"))' <<<"$count_json")"
@@ -124,45 +140,18 @@ run_once() {
     return 0
   fi
 
-  prompt_file="$SCRIPT_DIR/${QUEUE_NAME}-loop-prompt.md"
-  [[ -f "$prompt_file" ]] || { echo "Missing $prompt_file" >&2; return 1; }
-  prompt_text="$(sed "s/{{AGENT}}/$AGENT_TOKEN/g" "$prompt_file")"
-  local -a command_line
-  if [[ "$AGENT_TOKEN" =~ ^(sol|terra|luna)$ ]]; then
-    local codex_bin codex_model codex_effort
-    codex_bin="$(command -v codex || true)"
-    [[ -z "$codex_bin" && -x /Applications/Codex.app/Contents/Resources/codex ]] && codex_bin=/Applications/Codex.app/Contents/Resources/codex
-    [[ -n "$codex_bin" ]] || { echo "Codex CLI not found" >&2; return 1; }
-    case "$AGENT_TOKEN" in
-      sol) codex_model="${CODEX_MODEL:-gpt-5.6-sol}" ;;
-      terra) codex_model="${CODEX_MODEL:-gpt-5.6-terra}" ;;
-      luna) codex_model="${CODEX_MODEL:-gpt-5.6-luna}" ;;
-    esac
-    codex_effort="${CODEX_EFFORT:-$item_effort}"
-    run_effort="$codex_effort"
-    # `-` reads the prompt from stdin (fed below) so the CLI sees an immediate
-    # EOF instead of inheriting launchd's stdin and waiting on it forever.
-    prompt_via_stdin=1
-    command_line=("$TIMEOUT_BIN" --signal=TERM --kill-after=30s "$LOOP_TIMEOUT_SECONDS" "$codex_bin" exec --sandbox danger-full-access -m "$codex_model" -c "model_reasoning_effort=$codex_effort" -C "$REPO_ROOT" -)
-  elif [[ "$AGENT_TOKEN" =~ ^(opus|sonnet|fable)$ ]]; then
-    local claude_bin claude_model claude_effort guard settings
-    claude_bin="$(command -v claude || true)"
-    [[ -z "$claude_bin" && -x "$HOME/.local/bin/claude" ]] && claude_bin="$HOME/.local/bin/claude"
-    [[ -n "$claude_bin" ]] || { echo "Claude CLI not found" >&2; return 1; }
-    claude_model="${CLAUDE_MODEL:-$AGENT_TOKEN}"
-    claude_effort="${CLAUDE_EFFORT:-$item_effort}"
-    run_effort="$claude_effort"
-    guard="$SCRIPT_DIR/headless-guard.py"
-    settings="{\"hooks\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"python3 $guard\"}]}]}}"
-    command_line=("$TIMEOUT_BIN" --signal=TERM --kill-after=30s "$LOOP_TIMEOUT_SECONDS" env "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=$CLAUDE_BACKGROUND_WAIT_CEILING_MS" "$claude_bin" -p --model "$claude_model" --effort "$claude_effort" --dangerously-skip-permissions --settings "$settings" "$prompt_text")
-  else
-    local grok_bin grok_effort
-    grok_bin="$(command -v grok || true)"
-    [[ -n "$grok_bin" ]] || { echo "Grok CLI not found" >&2; return 1; }
-    grok_effort="${GROK_EFFORT:-$item_effort}"
-    run_effort="$grok_effort"
-    command_line=("$TIMEOUT_BIN" --signal=TERM --kill-after=30s "$LOOP_TIMEOUT_SECONDS" "$grok_bin" -p --reasoning-effort "$grok_effort" "$prompt_text")
-  fi
+  prompt_template="$SCRIPT_DIR/${QUEUE_NAME}-loop-prompt.md"
+  [[ -f "$prompt_template" ]] || { echo "Missing $prompt_template" >&2; return 1; }
+  [[ -x "$RUNNER_ADAPTER" ]] || { echo "Missing runner adapter $RUNNER_ADAPTER" >&2; return 1; }
+  # Fail before a run row exists when the CLI is not installed, as before.
+  PA_COMMAND_JSON="$PA_COMMAND_JSON" "$RUNNER_ADAPTER" check >/dev/null || return 1
+  # The runner's documented env overrides (CODEX_MODEL, CLAUDE_EFFORT, ...) win
+  # over the configured model and the item's effort; resolving them here keeps
+  # the recorded effort equal to the one the CLI actually gets.
+  run_model="$PA_MODEL"
+  run_effort="$item_effort"
+  if [[ -n "$PA_MODEL_ENV" ]]; then run_model="${!PA_MODEL_ENV:-$PA_MODEL}"; fi
+  if [[ -n "$PA_EFFORT_ENV" ]]; then run_effort="${!PA_EFFORT_ENV:-$item_effort}"; fi
 
   # `$$` is this run-loop.sh process even inside the command substitution, and
   # it is the pid the reaper checks to tell a killed run from a sleeping Mac.
@@ -172,15 +161,24 @@ run_once() {
   log_dir="$REPO_ROOT/.agent-logs"
   mkdir -p "$log_dir"
   log_file="$log_dir/${QUEUE_NAME}-${AGENT_TOKEN}-${loop_run_id}.log"
+  prompt_file="$log_dir/${QUEUE_NAME}-${AGENT_TOKEN}-${loop_run_id}.prompt.md"
+  sed "s/{{AGENT}}/$AGENT_TOKEN/g" "$prompt_template" > "$prompt_file"
+
+  # The adapter contract (runners/README.md): PA_* environment in, the CLI's
+  # stdout/stderr out, its exit code back. The outer timeout stays here so every
+  # runner gets the same wall and kill escalation.
+  local -a command_line=("$TIMEOUT_BIN" --signal=TERM --kill-after=30s "$LOOP_TIMEOUT_SECONDS" env
+    "PA_AGENT=$AGENT_TOKEN" "PA_QUEUE=$QUEUE_NAME" "PA_RUNNER=$PA_RUNNER"
+    "PA_MODEL=$run_model" "PA_EFFORT=$run_effort" "PA_PROMPT_FILE=$prompt_file"
+    "PA_REPO_ROOT=$REPO_ROOT" "PA_SANDBOX=$PA_SANDBOX" "PA_HEADLESS_GUARD=$SCRIPT_DIR/headless-guard.py"
+    "PA_BG_WAIT_CEILING_MS=$CLAUDE_BACKGROUND_WAIT_CEILING_MS" "PA_TIMEOUT_SECONDS=$LOOP_TIMEOUT_SECONDS"
+    "PA_COMMAND_JSON=$PA_COMMAND_JSON" "PA_PROMPT_VIA=$PA_PROMPT_VIA"
+    "$RUNNER_ADAPTER")
 
   set +e
-  # Claude and Grok take the prompt as an argument, so redirect stdin from
-  # /dev/null rather than leaving launchd's inherited stdin open.
-  if (( prompt_via_stdin )); then
-    "${command_line[@]}" <<<"$prompt_text" > >(tee "$log_file") 2>&1 &
-  else
-    "${command_line[@]}" </dev/null > >(tee "$log_file") 2>&1 &
-  fi
+  # Never leave launchd's inherited stdin open: an adapter whose CLI reads the
+  # prompt from stdin redirects it from PA_PROMPT_FILE, so every CLI sees EOF.
+  "${command_line[@]}" </dev/null > >(tee "$log_file") 2>&1 &
   local worker_pid=$! heartbeat_seconds=0 progress_seconds=0 progress_summary
   while kill -0 "$worker_pid" 2>/dev/null; do
     sleep 5
@@ -200,6 +198,7 @@ run_once() {
   wait "$worker_pid"
   exit_code=$?
   set -e
+  rm -f "$prompt_file"
   summary="$(tail -c 6000 "$log_file" 2>/dev/null || true)"
   if [[ -z "${summary//[[:space:]]/}" ]]; then
     summary="${AGENT_TOKEN} ${QUEUE_NAME} iteration exited ${exit_code} without captured output"

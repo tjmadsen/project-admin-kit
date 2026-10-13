@@ -46,7 +46,9 @@ notification Functions are optional. If enabled, configure `EMAIL_USER` and
 
 ## 5. Provision automation
 
-Install Codex, Claude, and/or Grok CLIs on a macOS runner. Update the enforcing
+Install the CLIs your configured `agents` use (Codex, Claude, and Grok by
+default; any other CLI through the `command` runner, see
+`scripts/agent-loops/runners/README.md`) on a macOS runner. Update the enforcing
 machine roster to include only the models and queues that host may run. Run the
 provisioner check, then install its launchd jobs. The Agent Loops page will show
 the first heartbeat and subsequent run history.

@@ -24,6 +24,9 @@ describe('Agent Loops access', () => {
     expect(screen.getByText('Current model usage')).toBeInTheDocument()
     expect(screen.getByText('What the loops actually did')).toBeInTheDocument()
     expect(screen.getAllByText('Codex Sol').length).toBeGreaterThan(0)
+    // Every Codex and Grok card says it runs without headless-guard.py; Claude cards do not.
+    expect(screen.getAllByText('unguarded')).toHaveLength(4)
+    expect(screen.getByText('Fresh-context Codex, Claude, and Grok workers coordinated through the same backlog.')).toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: 'Deploy loop model' })).not.toBeInTheDocument()
     expect(screen.getByText(/Administrators control deploy routing/i)).toBeInTheDocument()
   })

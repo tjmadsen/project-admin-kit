@@ -21,7 +21,9 @@ repository so isolated agent worktrees and PR release proofs remain coherent.
 - Agent-loop cards, provider usage, machine health, live progress, run history,
   stale-run recovery, and deploy-model selection.
 - Firestore and Storage rules plus emulator tests.
-- Firestore backlog CLIs and Codex, Claude, and Grok loop runners.
+- Firestore backlog CLIs and configurable loop agents: Codex, Claude, and Grok
+  runner adapters out of the box, plus a generic `command` runner for any other
+  CLI (`agents` in `project-admin.config.json`).
 - Human-gated Firebase Hosting, Functions, rules/indexes, Vercel, Flutter web,
   Cloud Run, and TestFlight runbooks.
 - Optional lifecycle email/push Functions and SwiftUI iOS admin shell.

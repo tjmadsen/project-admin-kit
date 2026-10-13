@@ -1,5 +1,21 @@
 import rawConfig from '../../../project-admin.config.json'
 
+/** One `agents` entry; see project-admin.config.schema.json. */
+export interface AgentConfigEntry {
+  token: string
+  label: string
+  short?: string
+  emoji?: string
+  runner: string
+  model: string
+  claimsUnassigned?: boolean
+  pollSeconds?: number
+  sandbox?: string
+  usage?: false | { provider: string; script: string }
+  command?: string[]
+  promptVia?: 'arg' | 'stdin'
+}
+
 export interface ProjectAdminConfig {
   schemaVersion: 1
   project: {
@@ -32,6 +48,8 @@ export interface ProjectAdminConfig {
     logDirectoryName: string
   }
   deployments: Record<string, boolean>
+  agents?: AgentConfigEntry[]
+  agentAliases?: Record<string, string>
 }
 
 export const projectConfig = rawConfig as ProjectAdminConfig

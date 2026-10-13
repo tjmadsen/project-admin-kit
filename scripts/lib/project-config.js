@@ -2,6 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { normalizeRoster } = require('./agent-roster');
 
 const ROOT = path.resolve(__dirname, '../..');
 const CONFIG_PATH = process.env.PROJECT_ADMIN_CONFIG || path.join(ROOT, 'project-admin.config.json');
@@ -17,6 +18,12 @@ function loadProjectConfig() {
     ['automation.defaultMachineId', config.automation?.defaultMachineId],
   ]) {
     if (!value || typeof value !== 'string') throw new Error(`Missing ${label} in ${CONFIG_PATH}`);
+  }
+  // Fail at load time, not mid-loop, when `agents`/`agentAliases` are invalid.
+  try {
+    normalizeRoster(config);
+  } catch (error) {
+    throw new Error(`${error.message} (${CONFIG_PATH})`);
   }
   return config;
 }

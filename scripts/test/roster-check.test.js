@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { entitlements, agentsForMachine, isEntitled } = require('../agent-loops/roster-check');
+const { entitlements, agentsForMachine, isEntitled, unknownAgents } = require('../agent-loops/roster-check');
 const { AGENTS } = require('../lib/agents');
 
 const rosterPath = path.join(__dirname, '..', 'agent-loops', 'roster-check.js');
@@ -77,6 +77,24 @@ test('the provisioner uses the intended polling cadence for each loop class', ()
     path.join(__dirname, '..', 'agent-loops', 'provision-machine.sh'),
     'utf8',
   );
-  assert.match(provisioner, /\[\[ "\$1" == "grok" \]\] && echo 1800 \|\| echo 300/);
+  // Cadence is per agent in the roster: Grok every thirty minutes, the rest every five.
+  assert.match(provisioner, /AGENTS_HELPER" get "\$1" pollSeconds/);
+  assert.equal(AGENTS.grok.pollSeconds, 1800);
+  assert.deepEqual([...new Set(Object.values(AGENTS).filter((agent) => agent.token !== 'grok').map((agent) => agent.pollSeconds))], [300]);
   assert.match(provisioner, /plist com\.projectadmin\.loop\.configured-deploy configured deploy 900/);
+});
+
+test('the provisioner checks each entitled agent through its runner adapter, not a fixed CLI list', () => {
+  const provisioner = fs.readFileSync(path.join(__dirname, '..', 'agent-loops', 'provision-machine.sh'), 'utf8');
+  assert.match(provisioner, /runners\/\$PA_RUNNER\.sh" check/);
+  assert.doesNotMatch(provisioner, /check_binary (Codex|Claude)/);
+});
+
+test('roster agents missing from the configured roster entitle nothing', () => {
+  const stale = { machines: [{ id: 'mac-mini', agents: ['opus', 'retired'], queues: ['bug'] }] };
+  const known = Object.keys(AGENTS);
+  assert.equal(isEntitled(stale, 'mac-mini', 'bug', 'retired', known), false);
+  assert.equal(isEntitled(stale, 'mac-mini', 'bug', 'opus', known), true);
+  assert.deepEqual(agentsForMachine(stale, 'mac-mini', known), ['opus']);
+  assert.deepEqual(unknownAgents(stale, 'mac-mini', known), ['retired']);
 });
