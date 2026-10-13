@@ -23,3 +23,7 @@ Requirements: a Playwright module (`PLAYWRIGHT_MODULE=/path/to/node_modules/play
 otherwise any copy cached by `npx` is used) and Google Chrome, or
 `CHROMIUM_PATH` pointing at a Chromium binary. `vite.config.ts` here aliases
 `lib/firebase` and the data hooks to `mocks/`, so nothing touches production.
+
+The README images in `docs/images/` are the `dashboard`, `features-detail`, and
+`loops` desktop scenes plus the mobile `dashboard`, in light and dark, reduced
+to a 256-color palette (the mobile shots at 1x) to keep the repository small.

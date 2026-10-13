@@ -5,7 +5,26 @@ record the version they were installed or upgraded from in
 `.project-admin/kit-lock.json`. Upgrade with `npm run kit:upgrade`
 ([docs/UPGRADING.md](docs/UPGRADING.md)).
 
-## 0.2.0
+## Unreleased
+
+### Added
+
+- `npm run demo`: a credential-free tryout that builds the console for the
+  `local` backend into `.project-admin/demo/`, seeds a throwaway store from the
+  screenshot fixtures, and serves it on 127.0.0.1:4318.
+- [SECURITY.md](SECURITY.md) (threat model and private vulnerability
+  reporting), [CONTRIBUTING.md](CONTRIBUTING.md),
+  [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), issue and PR templates, and
+  [docs/EXTENDING.md](docs/EXTENDING.md) (agents, runners, work kinds, deploy
+  targets, backends, schedulers).
+- `scripts/test/docs-links.test.js` checks every relative markdown link,
+  image, and heading anchor. CI runs the core suites on Node 20 and 22.
+
+### Changed
+
+- The loop confirmation detector no longer names a specific person; it matches
+  requests addressed to "you" or "the (project) owner".
+
 
 The kit is generalized from one project's operations console into a reusable
 starter: almost every project-specific assumption is now configuration.

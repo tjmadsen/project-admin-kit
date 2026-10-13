@@ -1,7 +1,8 @@
 # Project Admin agent loops
 
-The admin backlog is stored in the Firebase project selected by
-`project-admin.config.json`. Every agent shares the same queue protocol with
+The backlog lives in the store selected by `backend` in
+`project-admin.config.json` (Firestore, a local JSON file, or GitHub Issues;
+see [docs/BACKENDS.md](../../docs/BACKENDS.md)). Every agent shares the same queue protocol with
 one selectable owner (`<token>-agent`) per configured model. The roster is the
 top-level `agents` array in that file; without one, the built-in roster in
 `scripts/lib/agent-defaults.json` applies:
@@ -104,7 +105,7 @@ node scripts/agent-loops/log-run.js reap --machine local-mac [--stale-minutes 2]
 `reap` closes each running row on that machine whose heartbeat is stale and
 whose recorded runner pid is gone, marking it `interrupted` with exit 137 and a
 duration frozen at the last heartbeat, and releases the item it claimed. A
-paused or sleeping Mac keeps its runner pid, so heartbeat age alone never costs
+paused or sleeping machine keeps its runner pid, so heartbeat age alone never costs
 a live run its claim; rows written before pids were recorded are reported and
 left alone. `install` sweeps after re-bootstrapping, and because every plist
 sets `RunAtLoad` (and every timer `OnActiveSec`), the jobs it just ended sweep
@@ -125,7 +126,7 @@ than guessing; so does any agent with no hook. An agent can name its own
 `usage` script (see runners/README.md).
 The Claude probe runs from the repository's parent development directory; set
 `CLAUDE_USAGE_WORKDIR` to another already-trusted directory when provisioning a
-different Mac.
+different machine.
 
 ## Provision a worktree
 
@@ -244,7 +245,8 @@ docker logs -f project-admin-loops
 The image sets `PROJECT_ADMIN_MACHINE_ID=container`; change it per container.
 Claude Code accepts `ANTHROPIC_API_KEY` (or a mounted `~/.claude`), Codex reads
 `~/.codex/auth.json`, the backlog CLIs use Application Default Credentials from
-the mounted gcloud directory, and `gh` handles PRs. Logs land under
+the mounted gcloud directory (firestore backend; github reads `GITHUB_TOKEN`
+or the mounted `gh` login), and `gh` handles PRs. Logs land under
 `/home/node/.local/state` inside the container; mount a volume there to keep
 them. `docker stop` sends SIGTERM, which the scheduler handles as above.
 

@@ -179,7 +179,7 @@ export default function AgentLoops({ canManage = true }: { canManage?: boolean }
       </div>
     </section>
     <section className="panel loop-config-panel">
-      <div><p className="eyebrow">Queue routing</p><h2>Choose who ships production</h2><p>Feature and bug models are selected on each item. The shared deploy queue uses this model for its next fresh-context run.</p></div>
+      <div><p className="eyebrow">Queue routing</p><h2>Choose who ships production</h2><p>Build models are selected on each work item. The shared deploy queue uses this model for its next fresh-context run.</p></div>
       {canManage
         ? <label>Deploy loop model<select aria-label="Deploy loop model" value={config.deployAgent} disabled={saving} onChange={(event) => void setDeployAgent(event.target.value as AgentModelToken)}>{AGENT_MODELS.map((agent) => <option key={agent.token} value={agent.token}>{agent.emoji} {agent.label}</option>)}</select><small>{saving ? 'Saving…' : 'Saved automatically · used on the next poll'}</small></label>
         : <div className="readonly-field loop-readonly-field"><span>Deploy loop model</span><strong>{agentByToken(config.deployAgent)?.label || config.deployAgent}</strong><small>Administrators control deploy routing. You can view usage, workers, and run history.</small></div>}

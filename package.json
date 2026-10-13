@@ -2,7 +2,7 @@
   "name": "project-admin-kit",
   "version": "0.2.0",
   "private": true,
-  "description": "A reusable Firebase admin console and autonomous agent operations platform.",
+  "description": "A reusable operations console and autonomous coding-agent platform: configurable work items, human approval gates, and agent loops over Firestore, a local JSON store, or GitHub Issues.",
   "bin": {
     "create-project-admin": "scripts/create-project-admin.js"
   },
@@ -13,6 +13,7 @@
     "configure": "node scripts/configure.js",
     "bootstrap-admin": "node scripts/admin-users.js add",
     "local": "node scripts/local-server.js",
+    "demo": "node scripts/demo.js",
     "sync:work-kinds": "node scripts/lib/work-kinds.js sync",
     "migrate:work-items": "node scripts/migrate-work-items.js",
     "kit:upgrade": "node scripts/kit-upgrade.js",

@@ -11,3 +11,4 @@ extras/native-ios/GoogleService-Info.plist
 extras/native-ios/*.xcodeproj/
 *.xcarchive
 .DS_Store
+.project-admin/demo/

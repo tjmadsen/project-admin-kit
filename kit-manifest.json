@@ -50,6 +50,7 @@
     "extras/native-ios/*.xcodeproj/**",
     "extras/native-ios/GoogleService-Info.plist",
     "*.log",
-    ".project-admin/kit-lock.json"
+    ".project-admin/kit-lock.json",
+    ".project-admin/demo/**"
   ]
 }
