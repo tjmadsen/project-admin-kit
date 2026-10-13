@@ -16,7 +16,6 @@ jobs:
           cache: npm
           cache-dependency-path: |
             admin-app/package-lock.json
-            extras/functions/package-lock.json
             scripts/package-lock.json
       - run: npm run install:all
       - run: npm test
@@ -30,10 +29,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: |
-            scripts/package-lock.json
-            extras/functions/package-lock.json
-      - run: npm ci --prefix scripts
+          cache-dependency-path: extras/functions/package-lock.json
       - run: npm run install:extras
       - run: npm run test:extras
 
