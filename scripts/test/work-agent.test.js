@@ -108,6 +108,62 @@ test('the deploy queue spans every deploying kind and never claims a non-deployi
   assert.equal(db.read('workItems/task-3').claimedBy, undefined);
 });
 
+test('a target disabled after approval still completes its approved release; new scopes stay strict', async () => {
+  // The sample config lists testflight with enabled: false.
+  const { db, run, item } = setup();
+  item('feature-7', {
+    kind: 'feature', number: 7, status: 'ready_for_deploy', waitingOn: 'deployer', claimedBy: 'sonnet',
+    deploymentApprovedAt: Timestamp.now(), deploymentApprovedTargets: ['testflight', 'firebase_hosting'],
+  });
+  await run(null, 'deploy-check', 'feature-7', '--as', 'sonnet', '--target', 'firebase_hosting', '--proof', 'Hosting release 42 serves the new bundle.', '--acceptance', 'The admin route renders the requested change.');
+  // Before the fix, the disabled target was rejected here and stranded the release.
+  await run(null, 'deploy-check', 'feature-7', '--as', 'sonnet', '--target', 'testflight', '--proof', 'Archive for build 2610120101 uploaded.', '--acceptance', 'The owner will test the feature in TestFlight.');
+  await assert.rejects(run(null, 'complete', 'feature-7', '--as', 'sonnet', '-m', 'done'), /TestFlight items require .* hands-on acceptance/);
+  await run(null, 'deployment-started', 'feature-7', '--as', 'sonnet', '--target', 'testflight', '-m', 'TestFlight upload launched');
+  await assert.rejects(run(null, 'verification-pending', 'feature-7', '--as', 'sonnet', '--target', 'firebase_hosting', '-m', 'Hosting is live'), /only for targets with requiresHumanAcceptance/);
+  const handed = await run(null, 'verification-pending', 'feature-7', '--as', 'sonnet', '--build', '2610120101', '-m', 'TestFlight build 2610120101 is VALID.');
+  assert.deepEqual([handed.target, handed.status], ['testflight', 'in_review']);
+  const saved = db.read('workItems/feature-7');
+  assert.equal(saved.blockedReason, 'acceptance_review');
+  assert.equal(saved.deploymentEvidence.testflight.proof, 'TestFlight build 2610120101 is VALID.');
+
+  item('feature-8', { kind: 'feature', number: 8, status: 'in_review', waitingOn: 'agent' });
+  await assert.rejects(run(null, 'deploy-pending', 'feature-8', '--as', 'sonnet', '--targets', 'testflight', '--notes', approvedNotes, '-m', 'ready'), /"testflight" is disabled/);
+});
+
+test('verification-pending hands any requiresHumanAcceptance target to acceptance review', () => {
+  // The contract resolves targets from config once per process, so use a child.
+  const dir = require('node:fs').mkdtempSync(path.join(require('node:os').tmpdir(), 'project-admin-acceptance-'));
+  const custom = { ...config, deployments: { targets: { store_review: { label: 'Store review', runbook: 'docs/store.md', requiresHumanAcceptance: true }, firebase_hosting: {} } } };
+  const file = path.join(dir, 'config.json');
+  require('node:fs').writeFileSync(file, JSON.stringify(custom));
+  const script = `
+    const { Timestamp } = require('@google-cloud/firestore');
+    const { createBacklogAgent } = require(${JSON.stringify(path.join(__dirname, '../lib/backlog-agent'))});
+    const { loadProjectConfig } = require(${JSON.stringify(path.join(__dirname, '../lib/project-config'))});
+    const { resolveWorkKinds } = require(${JSON.stringify(path.join(__dirname, '../lib/work-kinds'))});
+    const { FieldValue, createFakeFirestore } = require(${JSON.stringify(path.join(__dirname, 'support/fake-firestore'))});
+    const db = createFakeFirestore();
+    const outputs = [];
+    const cli = createBacklogAgent({ db, FieldValue, Timestamp, config: loadProjectConfig(), kinds: resolveWorkKinds({ feature: {} }), kindId: null,
+      env: { PROJECT_ADMIN_MACHINE_ID: 'local-mac' }, uploadAttachments: async () => [], log: (line) => outputs.push(JSON.parse(line)) });
+    db.seed('workItems/f1', { kind: 'feature', number: 1, priority: 'medium', messages: [], status: 'ready_for_deploy', waitingOn: 'deployer',
+      claimedBy: 'sonnet', deploymentApprovedAt: Timestamp.now(), deploymentApprovedTargets: ['store_review'] });
+    (async () => {
+      let refused = '';
+      try { await cli.run(['complete', 'f1', '--as', 'sonnet', '-m', 'done']); } catch (error) { refused = error.message; }
+      await cli.run(['verification-pending', 'f1', '--as', 'sonnet', '--target', 'store_review', '-m', 'Submitted build 9 is in review.']);
+      const saved = db.read('workItems/f1');
+      console.log(JSON.stringify({ refused, out: outputs.at(-1), gate: saved.blockedReason, proof: saved.deploymentEvidence.store_review.proof }));
+    })().catch((error) => { console.error(error); process.exit(1); });`;
+  const result = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8', cwd: path.join(__dirname, '..'), env: { ...process.env, PROJECT_ADMIN_CONFIG: file } });
+  assert.equal(result.status, 0, result.stderr);
+  const outcome = JSON.parse(result.stdout.trim().split('\n').at(-1));
+  assert.match(outcome.refused, /Store review items require .* hands-on acceptance/);
+  assert.deepEqual([outcome.out.target, outcome.out.status, outcome.gate], ['store_review', 'in_review', 'acceptance_review']);
+  assert.equal(outcome.proof, 'Submitted build 9 is in review.');
+});
+
 test('dependencies resolve across kinds inside workItems', async () => {
   const { run, item } = setup();
   item('bug-4', { kind: 'bug', number: 4, status: 'in_review', waitingOn: 'human' });

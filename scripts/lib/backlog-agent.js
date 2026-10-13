@@ -5,11 +5,13 @@ const os = require('node:os');
 const { resolveAgent } = require('./agents');
 const {
   assertClosableWithoutDeployment,
+  deployTargetLabel,
   deploymentTargetsFor,
   legacyDeploymentType,
   missingDeploymentEvidence,
   normalizeDeploymentTargets,
   resetDeploymentForPrChange,
+  targetsRequiringHumanAcceptance,
   validateDeploymentNotes,
 } = require('./deployment-contract');
 const {
@@ -288,7 +290,8 @@ function createBacklogAgent({
     if (!id) throw new Error('Missing item id');
     const agent = agentFrom(flags);
     const target = requireFlag(flags, 'target');
-    normalizeDeploymentTargets([target]);
+    // Post-approval: the recorded scope governs, even if config disabled the target since.
+    normalizeDeploymentTargets([target], { allowDisabled: true });
     const proof = requireMeaningfulFlag(flags, 'proof');
     const acceptance = requireMeaningfulFlag(flags, 'acceptance');
     const ref = items().doc(id);
@@ -336,12 +339,15 @@ function createBacklogAgent({
   async function markVerificationPending(id, flags) {
     const result = requireMessage(flags);
     const agent = agentFrom(flags);
+    // Any approved target with requiresHumanAcceptance; TestFlight's autoship omits --target.
+    const target = flags.target && flags.target !== true ? flags.target : 'testflight';
     const { ref, data, kind } = await loadItem(id);
     requireDeploys(kind);
-    requireApprovedTarget(data, 'testflight');
+    requireApprovedTarget(data, target);
+    if (targetsRequiringHumanAcceptance([target]).length === 0) throw new Error(`verification-pending is only for targets with requiresHumanAcceptance; record ${target} with deploy-check`);
     const evidence = {
       ...(data.deploymentEvidence || {}),
-      testflight: {
+      [target]: {
         proof: result,
         acceptance: `The build is available for ${OWNER_NAME} to test against the work-item acceptance context.`,
         verifiedAt: Timestamp.now(),
@@ -355,7 +361,7 @@ function createBacklogAgent({
       deploymentInProgressTarget: null, claimedBy: null, claimRunId: null, leaseExpiresAt: null,
       messages: FieldValue.arrayUnion(message(agent.label, result)), updatedAt: FieldValue.serverTimestamp(),
     });
-    json({ ok: true, id, ref: itemReference(kinds, data), target: 'testflight', status: 'in_review' });
+    json({ ok: true, id, ref: itemReference(kinds, data), target, status: 'in_review' });
   }
 
   async function completeItem(id, flags, verb) {
@@ -368,7 +374,8 @@ function createBacklogAgent({
     if (!data.deploymentApprovedAt) throw new Error(`Cannot complete an item before ${OWNER_NAME} approves its deployment scope`);
     const targets = deploymentTargetsFor(data, true);
     if (targets.length === 0) throw new Error('Cannot complete an item with an ambiguous or empty approved deployment scope');
-    if (targets.includes('testflight')) throw new Error(`TestFlight items require ${OWNER_NAME} hands-on acceptance and cannot be closed by the deploy loop`);
+    const humanAccepted = targetsRequiringHumanAcceptance(targets);
+    if (humanAccepted.length > 0) throw new Error(`${humanAccepted.map(deployTargetLabel).join(' + ')} items require ${OWNER_NAME} hands-on acceptance and cannot be closed by the deploy loop`);
     const missing = missingDeploymentEvidence(data, targets);
     if (missing.length > 0) throw new Error(`Cannot complete deployment; missing target-specific proof and acceptance verification for: ${missing.join(', ')}`);
     return mutate(id, flags, {

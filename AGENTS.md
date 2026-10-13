@@ -18,12 +18,16 @@ Run every suite a change touches.
 | Agent tooling | `cd scripts && npm test` | all tests pass |
 | Backlog credential smoke | `node scripts/work-agent.js --kind feature count --as terra` | returns a JSON count |
 | Work-kind sync | `node scripts/lib/work-kinds.js check` | silent; run `npm run sync:work-kinds` if it reports drift |
+| Deploy-target runbooks | `node scripts/lib/deploy-targets.js check` | exits 0; every configured target's runbook exists |
 
 The rules suite needs both emulators. A fresh worktree has no `auth.env` or
 `node_modules`; immediately run
 `scripts/agent-loops/provision-worktree.sh <worktree-path>` after creating it.
-Node/model CLIs may be installed outside launchd's default PATH. Use
-`/usr/sbin/scutil` by absolute path when detecting a macOS host.
+Node/model CLIs may be installed outside a scheduler's default PATH (launchd,
+systemd, and cron all start jobs with a minimal one). Use `/usr/sbin/scutil` by
+absolute path when detecting a macOS host, and guard macOS-only tools
+(`taskpolicy`, `osascript`, `launchctl`) behind a Darwin check; loops also run
+on Linux.
 
 ## Working disposition
 
@@ -37,6 +41,7 @@ Node/model CLIs may be installed outside launchd's default PATH. Use
 | When touching | Read first |
 |---|---|
 | `scripts/*`, deployment code, or release configuration | `.claude/commands/deploy-loop.md` |
+| a deploy target's procedure | that target's `runbook` in `deployments.targets` (built-ins: `docs/deploy-targets/<target>.md`; `node scripts/lib/deploy-targets.js list`) |
 | a work kind's lifecycle behavior | that kind's `runbook` in `workKinds` (feature: `.claude/commands/feature-loop.md`, bug: `.claude/commands/bug-loop.md`, task: `.claude/commands/task-loop.md`) |
 
 Prompt files under `scripts/agent-loops/` are entry-point shims and delegate to
@@ -55,7 +60,9 @@ the canonical runbooks.
 - Kinds with `deploys: false` (tasks) never enter the deploy queue; their loop
   merges the approved PR and closes the item with `close-no-deploy`.
 - Build loops open PRs and never deploy. The deploy loop executes only a human-
-  approved target set with Scope/Commands/Verification/Acceptance notes.
+  approved target set with Scope/Commands/Verification/Acceptance notes, using
+  each target's configured runbook. Targets with `requiresHumanAcceptance`
+  (TestFlight by default) return to acceptance review instead of closing.
 - Never edit backlog Firestore documents directly.
 
 ## Access and deployment

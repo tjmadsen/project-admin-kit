@@ -8,7 +8,8 @@ auditable releases.
 
 It is a starter repository rather than only a UI package because the useful
 system crosses six boundaries: React, Firebase security, Firestore data,
-headless CLI agents, macOS scheduling, and deployment runbooks. Clone or use it
+headless CLI agents, loop scheduling (launchd, systemd, cron, or a portable
+foreground scheduler), and deployment runbooks. Clone or use it
 as a GitHub template for each product, then keep the app's own code in the same
 repository so isolated agent worktrees and PR release proofs remain coherent.
 
@@ -27,7 +28,8 @@ repository so isolated agent worktrees and PR release proofs remain coherent.
   runner adapters out of the box, plus a generic `command` runner for any other
   CLI (`agents` in `project-admin.config.json`).
 - Human-gated Firebase Hosting, Functions, rules/indexes, Vercel, Flutter web,
-  Cloud Run, and TestFlight runbooks.
+  Cloud Run, and TestFlight runbooks; deploy targets are configuration
+  (`deployments.targets`), so a new surface is a config entry plus a runbook.
 - Optional lifecycle email/push Functions and SwiftUI iOS admin shell.
 - CI, screenshot harness, configuration/bootstrap tooling, and a placeholder
   marketing page.
@@ -80,11 +82,14 @@ marketing site at `/` and rewrites the configured admin path to the SPA.
 
 ```bash
 scripts/agent-loops/provision-machine.sh check
-scripts/agent-loops/provision-machine.sh install
+scripts/agent-loops/provision-machine.sh install   # launchd on macOS, systemd on Linux
 scripts/agent-loops/provision-machine.sh status
+npm run loops                                      # or run them in the foreground / Docker
 ```
 
-Edit `scripts/agent-loops/machine-roster.json` when using more than one machine.
+`automation.scheduler` selects launchd, systemd, cron, or foreground, and
+`notifications` routes loop alerts to the desktop and/or a Slack, ntfy, or JSON
+webhook. Edit `scripts/agent-loops/machine-roster.json` when using more than one machine.
 Each scheduled queue/model pair gets a dedicated worktree and lock. All human
 decisions live in the work-item thread; all releases require an immutable
 approved target list and concrete verification evidence.

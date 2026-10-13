@@ -61,11 +61,53 @@ implementation; the deploy queue spans every kind with `deploys: true`.
 The deploy approval is a durable capability grant for exactly the recorded PR,
 branch, targets, commands, verification, and acceptance behavior. The deploy
 loop cannot widen it and closure is rejected until every approved target has
-concrete proof. TestFlight always returns to human acceptance.
+concrete proof. A target with `requiresHumanAcceptance` (TestFlight by default)
+always returns to human acceptance.
+
+## Deploy targets
+
+Deploy targets are configuration too. `project-admin.config.json#deployments`
+maps each target id (`^[a-z][a-z0-9_]*$`) to a definition:
+
+| Field | Meaning |
+|---|---|
+| `label` | console and CLI name |
+| `runbook` | repository-relative markdown with the target's preconditions, time-bounded commands, live proof, and known failures |
+| `requiresHumanAcceptance` | the CLI refuses `complete`; the deploy loop records proof with `verification-pending --target <id>`, which returns the item to acceptance review |
+| `enabled` | `false` hides it from the console picker and rejects new `--targets` selections; already-approved scopes still deploy, record proof, and close |
+
+```json
+"deployments": {
+  "targets": {
+    "firebase_hosting": {},
+    "testflight": { "enabled": false },
+    "fly": { "label": "Fly.io", "runbook": "docs/deploy-targets/fly.md" }
+  }
+}
+```
+
+Built-in ids (`testflight`, `firebase_hosting`, `firebase_functions`,
+`firebase_rules_indexes`, `vercel`, `flutter_web`, `cloud_run`) may omit fields,
+which fall back to `scripts/lib/deploy-targets.defaults.json` and the runbooks in
+`docs/deploy-targets/`. `none` is built in, reserved, exclusive, and always
+available. The backlog CLI (`scripts/lib/deployment-contract.js`), the console's
+target picker and labels, and the deploy loop all read the same resolved list;
+`.claude/commands/deploy-loop.md` is generic and opens each approved target's
+runbook through `node scripts/lib/deploy-targets.js show <target>`.
+[`docs/deploy-targets/examples/fly.md`](deploy-targets/examples/fly.md) shows a
+complete non-built-in target added with config and a runbook alone.
+
+The earlier flat boolean map (`{ "firebaseHosting": true, "testflight": false }`)
+still loads. Nothing ever enforced those booleans, so it keeps every built-in
+target enabled exactly as before; `node scripts/lib/deploy-targets.js migrate`
+prints the equivalent `targets` map with each `false` carried over as
+`enabled: false`.
 
 ## Loop isolation and recovery
 
-Scheduled polls run from dedicated clean worktrees. Actual work-item work gets
+Scheduled polls (launchd, systemd user timers, cron, or the portable
+`scheduler.js`, all generated from the same machine-roster job set) run from
+dedicated clean worktrees. Actual work-item work gets
 another durable branch-backed worktree. Heartbeats and progress snapshots feed
 the dashboard. A reaper detects dead runner PIDs, freezes run duration, returns
 the exact claim to its queue, and preserves the implementation worktree.

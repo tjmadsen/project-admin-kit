@@ -33,6 +33,17 @@ export interface WorkKindConfig {
   copy?: { eyebrow?: string; adminDescription?: string; collaboratorDescription?: string; createLabel?: string; statDetail?: 'queued' | 'critical' }
 }
 
+// One `deployments.targets` entry; built-in ids may omit label and runbook.
+export interface DeployTargetConfig {
+  label?: string
+  runbook?: string
+  requiresHumanAcceptance?: boolean
+  enabled?: boolean
+}
+
+// The `targets` map, or the legacy boolean map keyed by firebaseHosting, ...
+export type DeploymentsConfig = { targets: Record<string, DeployTargetConfig> } | Record<string, boolean>
+
 export interface ProjectAdminConfig {
   schemaVersion: 1
   project: {
@@ -64,8 +75,10 @@ export interface ProjectAdminConfig {
     defaultDeployAgent: string
     stateDirectory: string
     logDirectoryName: string
+    scheduler?: 'launchd' | 'systemd' | 'cron' | 'foreground'
   }
-  deployments: Record<string, boolean>
+  notifications?: { desktop?: boolean; webhook?: boolean | { urlEnv?: string; format?: 'json' | 'slack' | 'ntfy' } }
+  deployments?: DeploymentsConfig
   agents?: AgentConfigEntry[]
   agentAliases?: Record<string, string>
 }

@@ -22,6 +22,7 @@ test('configure applies a new project identity across deployable surfaces', (t) 
     'scripts/configure.js', 'scripts/project-env.js', 'scripts/lib/project-config.js',
     'scripts/lib/agent-roster.js', 'scripts/lib/agent-defaults.json',
     'scripts/lib/work-kinds.js', 'scripts/lib/work-kinds.defaults.json',
+    'scripts/lib/deploy-targets.js', 'scripts/lib/deploy-targets.defaults.json', 'scripts/lib/automation.js',
     'firestore.rules', 'storage.rules',
     'scripts/agent-loops/machine-roster.json',
   ]) {

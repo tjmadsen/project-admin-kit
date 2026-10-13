@@ -3,8 +3,9 @@
 ## Prerequisites
 
 Install Node 20, Java 21, the Firebase CLI, Google Cloud CLI, Git, and GitHub CLI.
-macOS loop runners also need Homebrew coreutils (`gtimeout`) and at least one
-supported agent CLI. Xcode, Flutter, and XcodeGen are needed only for the
+Loop runners need GNU coreutils (`brew install coreutils` on macOS for
+`gtimeout`; Linux distributions ship `timeout`) and at least one supported
+agent CLI. Xcode, Flutter, and XcodeGen are needed only for the
 optional mobile release paths.
 
 ## 1. Create Firebase resources
@@ -58,20 +59,50 @@ key entirely to get only the built-in feature + bug pair.
 
 Install the CLIs your configured `agents` use (Codex, Claude, and Grok by
 default; any other CLI through the `command` runner, see
-`scripts/agent-loops/runners/README.md`) on a macOS runner. Update the enforcing
+`scripts/agent-loops/runners/README.md`) on a runner host. Update the enforcing
 machine roster to include only the models and queues that host may run. Run the
-provisioner check, then install its launchd jobs. The Agent Loops page will show
-the first heartbeat and subsequent run history.
+provisioner check, then install its jobs: launchd on macOS and systemd user
+timers on Linux by default, or set `automation.scheduler` to `cron` or
+`foreground` (`npm run loops`, also the entry point of `Dockerfile.loops`). See
+`scripts/agent-loops/README.md` for each scheduler, containers, and the
+`notifications` block (desktop and Slack/ntfy/JSON webhooks). The Agent Loops
+page will show the first heartbeat and subsequent run history.
 
 Add each scheduled kind to that host's `queues` in the machine roster; the valid
 queue names are printed by `node scripts/lib/work-kinds.js queues`.
 
+## 7. Choose deploy targets
+
+`deployments.targets` in `project-admin.config.json` lists the release surfaces
+the console offers and the deploy loop may execute; each one points at a
+runbook (see [ARCHITECTURE.md](ARCHITECTURE.md#deploy-targets)). The sample
+enables Firebase Hosting, Functions, and rules/indexes and lists the other
+built-ins with `"enabled": false`. To add a surface the kit does not ship, write
+a runbook modeled on [`deploy-targets/examples/fly.md`](deploy-targets/examples/fly.md),
+add `"<id>": { "label": "...", "runbook": "..." }`, and run
+`node scripts/lib/deploy-targets.js check`.
+
 TestFlight is disabled in the sample configuration. To enable it, provide all
 `PROJECT_ADMIN_ASC_*`, Apple team, and bundle-id environment variables; generate
-the optional SwiftUI project with XcodeGen; and validate `--check` before adding
+the optional SwiftUI project with XcodeGen; validate `--check`; then set
+`"testflight": {}` (it keeps `requiresHumanAcceptance: true`) before adding
 TestFlight to any approved target set.
 
 ## Upgrading
+
+### From boolean `deployments` flags to `deployments.targets`
+
+The earlier `"deployments": { "firebaseHosting": true, ... }` map still loads
+and keeps every built-in target available, as before. To make the flags real,
+print the equivalent `targets` map and paste it over the old block:
+
+```bash
+node scripts/lib/deploy-targets.js migrate
+```
+
+Each `false` becomes `"enabled": false`, which hides that target from the
+console picker and rejects it in new `deploy-pending --targets`; items that
+already recorded it keep resolving.
 
 ### From separate `featureRequests`/`bugs` collections to `workItems`
 
@@ -79,8 +110,8 @@ Earlier releases stored each kind in its own collection. All kinds now live in
 one `workItems` collection with a `kind` field. Counter fields are unchanged
 (`nextFeatureNumber`, `nextBugNumber`), so numbering continues.
 
-1. Pause the loops (`scripts/agent-loops/provision-machine.sh status`, then
-   unload the launchd jobs) so nothing writes the legacy collections mid-copy.
+1. Pause the loops (`scripts/agent-loops/provision-machine.sh uninstall`, or
+   stop `npm run loops`) so nothing writes the legacy collections mid-copy.
 2. Preview the copy, then apply it with Application Default Credentials:
 
    ```bash
@@ -98,5 +129,5 @@ one `workItems` collection with a `kind` field. Counter fields are unchanged
    and delete the old triggers:
    `firebase functions:delete notifyFeatureLifecycle notifyBugLifecycle`.
    Migrated copies carry `migratedFrom`, so they do not send notifications.
-5. Reload the loops. Once you are satisfied, delete the legacy collections from
+5. Reload the loops (`provision-machine.sh install`). Once you are satisfied, delete the legacy collections from
    the Firebase console.

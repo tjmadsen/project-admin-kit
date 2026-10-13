@@ -81,11 +81,19 @@ test('the provisioner uses the intended polling cadence for each loop class', ()
     path.join(__dirname, '..', 'agent-loops', 'provision-machine.sh'),
     'utf8',
   );
-  // Cadence is per agent in the roster: Grok every thirty minutes, the rest every five.
-  assert.match(provisioner, /AGENTS_HELPER" get "\$1" pollSeconds/);
+  // Cadence is per agent in the roster: Grok every thirty minutes, the rest
+  // every five; the single deploy dispatcher every fifteen. Every scheduler
+  // renders from the same job set.
+  assert.match(provisioner, /schedulers\/index\.js/);
   assert.equal(AGENTS.grok.pollSeconds, 1800);
   assert.deepEqual([...new Set(Object.values(AGENTS).filter((agent) => agent.token !== 'grok').map((agent) => agent.pollSeconds))], [300]);
-  assert.match(provisioner, /plist com\.projectadmin\.loop\.configured-deploy configured deploy 900/);
+  const { loopJobs } = require('../agent-loops/schedulers');
+  const { loadProjectConfig } = require('../lib/project-config');
+  const jobs = loopJobs({ config: loadProjectConfig(), roster: require('../agent-loops/machine-roster.json'), machineId: 'local-mac' });
+  const interval = Object.fromEntries(jobs.map((job) => [job.id, job.interval]));
+  assert.equal(interval['grok-feature'], 1800);
+  assert.equal(interval['sol-bug'], 300);
+  assert.equal(interval['configured-deploy'], 900);
 });
 
 test('the provisioner checks each entitled agent through its runner adapter, not a fixed CLI list', () => {

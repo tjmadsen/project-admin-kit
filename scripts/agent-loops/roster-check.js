@@ -67,7 +67,8 @@ function unknownAgents(roster, machineId, knownAgents) {
 }
 
 if (require.main === module) {
-  const roster = require(path.join(__dirname, 'machine-roster.json'));
+  // PROJECT_ADMIN_MACHINE_ROSTER points a container or test at another roster.
+  const roster = require(process.env.PROJECT_ADMIN_MACHINE_ROSTER || path.join(__dirname, 'machine-roster.json'));
   const known = Object.keys(require('../lib/agents').AGENTS);
   const args = process.argv.slice(2);
 

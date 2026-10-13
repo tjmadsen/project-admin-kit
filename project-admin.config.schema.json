@@ -3,7 +3,7 @@
   "$id": "https://project-admin.local/project-admin.config.schema.json",
   "title": "Project Admin configuration",
   "type": "object",
-  "required": ["schemaVersion", "project", "firebase", "repository", "admin", "automation", "deployments"],
+  "required": ["schemaVersion", "project", "firebase", "repository", "admin", "automation"],
   "properties": {
     "schemaVersion": { "const": 1 },
     "project": {
@@ -163,11 +163,57 @@
     "automation": {
       "type": "object",
       "required": ["defaultMachineId", "defaultMachineLabel", "defaultWorkAgent", "defaultDeployAgent", "stateDirectory", "logDirectoryName"],
+      "properties": {
+        "scheduler": {
+          "enum": ["launchd", "systemd", "cron", "foreground"],
+          "description": "How provision-machine.sh schedules loops. Default: launchd on macOS, systemd (user timers) on Linux, foreground (npm run loops) elsewhere."
+        }
+      },
       "additionalProperties": { "type": "string" }
     },
-    "deployments": {
+    "notifications": {
+      "description": "Loop alert channels (e.g. an expired headless CLI session). Omit for a desktop alert only.",
       "type": "object",
-      "additionalProperties": { "type": "boolean" }
+      "additionalProperties": false,
+      "properties": {
+        "desktop": { "type": "boolean", "description": "osascript on macOS, notify-send on Linux when installed; default true." },
+        "webhook": {
+          "oneOf": [
+            { "type": "boolean" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "urlEnv": { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$", "description": "Environment variable holding the webhook URL (default PROJECT_ADMIN_NOTIFY_WEBHOOK_URL). Nothing is sent while it is unset." },
+                "format": { "enum": ["json", "slack", "ntfy"], "description": "json: POST {title, message, level}; slack: incoming-webhook {text}; ntfy: plain body with Title/Priority/Tags headers." }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "deployments": {
+      "description": "Deploy targets the deploy loop may execute. Use { \"targets\": { ... } }; the legacy flat boolean map (firebaseHosting, testflight, ...) still loads and keeps every built-in target enabled. Omit for every built-in target. `none` is built in and reserved.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["targets"],
+          "additionalProperties": false,
+          "properties": {
+            "targets": {
+              "type": "object",
+              "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$", "not": { "enum": ["none", "mixed"] } },
+              "additionalProperties": { "$ref": "#/$defs/deployTarget" }
+            }
+          }
+        },
+        {
+          "description": "Legacy shape: booleans keyed by firebaseHosting, firebaseFunctions, firebaseRulesIndexes, vercel, flutterWeb, cloudRun, testflight.",
+          "type": "object",
+          "not": { "required": ["targets"] },
+          "additionalProperties": { "type": "boolean" }
+        }
+      ]
     },
     "agents": {
       "description": "Selectable loop agents. Omit to use the built-in roster in scripts/lib/agent-defaults.json. Each agent's queue owner is <token>-agent.",
@@ -183,6 +229,17 @@
     }
   },
   "$defs": {
+    "deployTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Built-in ids (testflight, firebase_hosting, firebase_functions, firebase_rules_indexes, vercel, flutter_web, cloud_run) may omit label and runbook; see scripts/lib/deploy-targets.defaults.json.",
+      "properties": {
+        "label": { "type": "string", "minLength": 1 },
+        "runbook": { "type": "string", "minLength": 1, "description": "Repository-relative markdown runbook with the target's preconditions, commands, live proof, and known failures." },
+        "requiresHumanAcceptance": { "type": "boolean", "description": "The deploy loop records proof but returns the item to acceptance review instead of closing it." },
+        "enabled": { "type": "boolean", "description": "false hides the target from the admin picker and rejects new selections; recorded scopes still resolve." }
+      }
+    },
     "agent": {
       "type": "object",
       "required": ["token", "label", "runner", "model"],

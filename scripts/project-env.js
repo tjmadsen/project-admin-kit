@@ -4,6 +4,7 @@
 const { loadProjectConfig } = require('./lib/project-config');
 
 const config = loadProjectConfig();
+const automation = require('./lib/automation');
 const values = {
   PROJECT_NAME: config.project.name,
   PROJECT_SLUG: config.project.slug,
@@ -22,6 +23,13 @@ const values = {
   STATE_DIRECTORY: config.automation.stateDirectory,
   LOG_DIRECTORY_NAME: config.automation.logDirectoryName,
 };
+// Host-dependent values are computed only when asked for, so `shell` and `json`
+// stay cheap and deterministic.
+const hostValues = {
+  MACHINE_ID: () => automation.machineIdFor({ config }),
+  SCHEDULER: () => automation.resolveScheduler(config.automation),
+  LOOP_LOG_DIR: () => automation.logDirectory(config),
+};
 
 function shellQuote(value) {
   return `'${String(value).replace(/'/g, `'"'"'`)}'`;
@@ -32,8 +40,9 @@ if (command === 'shell') {
   for (const [name, value] of Object.entries(values)) console.log(`export ${name}=${shellQuote(value)}`);
 } else if (command === 'value') {
   const name = process.argv[3];
-  if (!(name in values)) throw new Error(`Unknown project value ${name}`);
-  process.stdout.write(String(values[name]));
+  if (name in hostValues) process.stdout.write(String(hostValues[name]()));
+  else if (name in values) process.stdout.write(String(values[name]));
+  else throw new Error(`Unknown project value ${name}`);
 } else {
   console.log(JSON.stringify(values, null, 2));
 }

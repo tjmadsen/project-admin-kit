@@ -1,5 +1,6 @@
 import type { Owner, ReviewGate, WaitingOn, WorkItem } from './types'
 import { agentByOwner } from './agents'
+import { deployTargetDefinition } from './deployment'
 import { projectConfig } from './project-config'
 import { workKindOrFallback } from './work-kinds'
 
@@ -59,11 +60,10 @@ export function gateLabel(gate?: ReviewGate | string) {
   } as Record<string, string>)[gate ?? ''] ?? gate ?? ''
 }
 
+// Configured targets carry their own label; the rest are legacy item values.
 export function deploymentLabel(type?: string) {
-  return ({
-    testflight: 'TestFlight', firebase_hosting: 'Firebase Hosting', firebase_functions: 'Firebase Functions',
-    firebase_rules: 'Firebase rules', firebase_rules_indexes: 'Rules & indexes', vercel: 'Vercel',
-    flutter_web: 'Flutter web', cloud_run: 'Cloud Run', mixed: 'Mixed release', none: 'No deploy',
+  return deployTargetDefinition(type ?? '')?.label ?? ({
+    firebase_rules: 'Firebase rules', mixed: 'Mixed release',
   } as Record<string, string>)[type ?? ''] ?? (type || 'Not selected').replaceAll('_', ' ')
 }
 

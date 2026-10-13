@@ -17,7 +17,7 @@
   <key>StartInterval</key><integer>__INTERVAL__</integer>
   <key>RunAtLoad</key><true/>
   <key>ProcessType</key><string>Background</string>
-  <key>StandardOutPath</key><string>__LOGDIR__/__AGENT__-__QUEUE__.log</string>
-  <key>StandardErrorPath</key><string>__LOGDIR__/__AGENT__-__QUEUE__.error.log</string>
+  <key>StandardOutPath</key><string>__LOGDIR__/__LOGNAME__.log</string>
+  <key>StandardErrorPath</key><string>__LOGDIR__/__LOGNAME__.error.log</string>
 </dict>
 </plist>

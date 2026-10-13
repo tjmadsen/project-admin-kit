@@ -1,0 +1,34 @@
+# Starting point for running the agent loops in a container with the portable
+# foreground scheduler (scripts/agent-loops/scheduler.js). The repository is
+# mounted, not copied, so loops create their .agent-worktrees and logs on the
+# host checkout. See "Run loops in a container" in scripts/agent-loops/README.md.
+#
+#   docker build -f Dockerfile.loops -t project-admin-loops .
+#   docker run --rm -it -v "$PWD:/repo" ... project-admin-loops
+#
+# Only the CLIs your configured `agents` use need to be installed; drop the rest.
+# TestFlight releases need macOS and are not available here.
+FROM node:20-bookworm-slim
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    bash ca-certificates coreutils curl git jq procps python3 ripgrep \
+  && rm -rf /var/lib/apt/lists/*
+
+# Agent CLIs. Pin versions here for reproducible images.
+ARG AGENT_CLIS="@anthropic-ai/claude-code @openai/codex"
+RUN if [ -n "$AGENT_CLIS" ]; then npm install -g $AGENT_CLIS && npm cache clean --force; fi
+
+# The node image's unprivileged user; mount credentials under /home/node.
+USER node
+ENV HOME=/home/node \
+    PROJECT_ADMIN_SCHEDULER=foreground \
+    PROJECT_ADMIN_MACHINE_ID=container
+# The mounted checkout belongs to the host user; let git operate on it anyway.
+RUN git config --global --add safe.directory '*'
+
+WORKDIR /repo
+# Exec form so `docker stop`'s SIGTERM reaches the scheduler directly. --grace
+# stays under Docker's default ten-second stop timeout, so running loops get
+# SIGTERM, then SIGKILL, before Docker kills the container itself.
+CMD ["node", "scripts/agent-loops/scheduler.js", "--grace", "8"]

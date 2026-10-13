@@ -20,11 +20,14 @@ under the recorded grant or use the backlog CLI's `ask` command to hand the item
 back. Never re-ask for an already approved named action. Ending a turn with a
 question in prose and no CLI lifecycle mutation is a hard failure.
 
-Record every non-TestFlight target independently with `deploy-check`; command
-success alone is not proof, and the item cannot close until each target has live
-proof plus contextual acceptance. TestFlight is launched last through
-`scripts/agent-loops/launch-testflight.sh`, returns to `acceptance_review`, and
-must never be closed by the deploy loop.
+Each approved target's procedure is its configured runbook
+(`node scripts/lib/deploy-targets.js show <target>`). Record every target
+independently with `deploy-check`; command success alone is not proof, and the
+item cannot close until each target has live proof plus contextual acceptance.
+Targets with `requiresHumanAcceptance` run last and return to
+`acceptance_review`; TestFlight is launched through
+`scripts/agent-loops/launch-testflight.sh` and must never be closed by the
+deploy loop.
 
 Pass `--as {{AGENT}}` on every backlog CLI command. Drain the deploy queue
 (`scripts/work-agent.js deploy-next`, which spans every kind that deploys) until

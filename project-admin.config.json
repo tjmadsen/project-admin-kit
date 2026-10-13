@@ -135,13 +135,19 @@
     "codex": "terra",
     "claude": "sonnet"
   },
+  "notifications": {
+    "desktop": true,
+    "webhook": { "urlEnv": "PROJECT_ADMIN_NOTIFY_WEBHOOK_URL", "format": "json" }
+  },
   "deployments": {
-    "firebaseHosting": true,
-    "firebaseFunctions": true,
-    "firebaseRulesIndexes": true,
-    "vercel": false,
-    "flutterWeb": false,
-    "cloudRun": false,
-    "testflight": false
+    "targets": {
+      "testflight": { "enabled": false },
+      "firebase_hosting": {},
+      "firebase_functions": {},
+      "firebase_rules_indexes": {},
+      "vercel": { "enabled": false },
+      "flutter_web": { "enabled": false },
+      "cloud_run": { "enabled": false }
+    }
   }
 }

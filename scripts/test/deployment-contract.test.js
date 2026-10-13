@@ -23,7 +23,7 @@ const notes = [
 test('normalizes explicit multi-target scopes and keeps none exclusive', () => {
   assert.deepEqual(normalizeDeploymentTargets('firebase_functions,firebase_hosting,firebase_functions'), ['firebase_hosting', 'firebase_functions']);
   assert.equal(legacyDeploymentType(['firebase_hosting', 'firebase_functions']), 'mixed');
-  assert.throws(() => normalizeDeploymentTargets('none,testflight'), /cannot be combined/i);
+  assert.throws(() => normalizeDeploymentTargets('none,firebase_hosting'), /cannot be combined/i);
   assert.throws(() => normalizeDeploymentTargets('mixed'), /invalid deployment target/i);
 });
 
@@ -90,7 +90,8 @@ test('deploy playbook reconciles PR context and records each target before closu
   assert.match(prompt, /Command success alone is not proof/i);
   assert.match(prompt, /cannot close the item until|rejects (completion|closure)/i);
   assert.match(backlog, /missingDeploymentEvidence\(data, targets\)/);
-  assert.match(backlog, /TestFlight items require \$\{OWNER_NAME\} hands-on acceptance/);
+  assert.match(backlog, /targetsRequiringHumanAcceptance\(targets\)/);
+  assert.match(backlog, /items require \$\{OWNER_NAME\} hands-on acceptance and cannot be closed by the deploy loop/);
   assert.match(testflightLauncher, /deployment-started/);
 });
 

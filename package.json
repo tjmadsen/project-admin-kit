@@ -11,6 +11,7 @@
     "bootstrap-admin": "node scripts/admin-users.js add",
     "sync:work-kinds": "node scripts/lib/work-kinds.js sync",
     "migrate:work-items": "node scripts/migrate-work-items.js",
+    "loops": "node scripts/agent-loops/scheduler.js",
     "build": "npm --prefix admin-app run build",
     "test": "npm run test:admin && npm run test:functions && npm run test:agents",
     "test:admin": "npm --prefix admin-app test",
