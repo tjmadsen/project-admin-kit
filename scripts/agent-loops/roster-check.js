@@ -12,6 +12,10 @@
  *   - provision-machine.sh, which enumerates entitlements (--list) instead of
  *     hardcoding the agent roster in a second place.
  *
+ * Agents must also exist in the configured roster (project-admin.config.json
+ * `agents`, via scripts/lib/agents.js): a roster entry for a token the config
+ * no longer defines entitles nothing, and the CLI warns about it.
+ *
  * The plain check form prints nothing and answers through its exit code.
  */
 
@@ -24,11 +28,14 @@ function machineEntry(roster, machineId) {
   return machines.find((machine) => machine && machine.id === machineId) || null;
 }
 
-function entitlements(roster, machineId) {
+// `knownAgents`, when given, is the configured token list; anything else in the
+// roster is ignored rather than trusted.
+function entitlements(roster, machineId, knownAgents) {
   const machine = machineEntry(roster, machineId);
   if (!machine) return [];
   const queues = Array.isArray(machine.queues) ? machine.queues : [];
-  const agents = Array.isArray(machine.agents) ? machine.agents : [];
+  const agents = (Array.isArray(machine.agents) ? machine.agents : [])
+    .filter((agent) => !knownAgents || knownAgents.includes(agent));
   const pairs = [];
   for (const queue of queues) {
     if (!QUEUES.includes(queue)) continue;
@@ -37,32 +44,41 @@ function entitlements(roster, machineId) {
   return pairs;
 }
 
-function agentsForMachine(roster, machineId) {
+function agentsForMachine(roster, machineId, knownAgents) {
   const seen = new Set();
-  for (const { agent } of entitlements(roster, machineId)) seen.add(agent);
+  for (const { agent } of entitlements(roster, machineId, knownAgents)) seen.add(agent);
   return [...seen];
 }
 
-function isEntitled(roster, machineId, queue, agent) {
-  return entitlements(roster, machineId).some((pair) => pair.queue === queue && pair.agent === agent);
+function isEntitled(roster, machineId, queue, agent, knownAgents) {
+  return entitlements(roster, machineId, knownAgents).some((pair) => pair.queue === queue && pair.agent === agent);
+}
+
+function unknownAgents(roster, machineId, knownAgents) {
+  const machine = machineEntry(roster, machineId);
+  const agents = machine && Array.isArray(machine.agents) ? machine.agents : [];
+  return agents.filter((agent) => !knownAgents.includes(agent));
 }
 
 if (require.main === module) {
   const roster = require(path.join(__dirname, 'machine-roster.json'));
+  const known = Object.keys(require('../lib/agents').AGENTS);
   const args = process.argv.slice(2);
 
   if (args[0] === '--list') {
-    for (const { queue, agent } of entitlements(roster, args[1])) console.log(`${queue} ${agent}`);
+    const unknown = unknownAgents(roster, args[1], known);
+    if (unknown.length) console.error(`machine-roster.json lists agents missing from the configured roster: ${unknown.join(', ')}`);
+    for (const { queue, agent } of entitlements(roster, args[1], known)) console.log(`${queue} ${agent}`);
     process.exit(0);
   }
 
   if (args[0] === '--agents') {
-    console.log(agentsForMachine(roster, args[1]).join(','));
+    console.log(agentsForMachine(roster, args[1], known).join(','));
     process.exit(0);
   }
 
   const [machineId, queue, agent] = args;
-  process.exit(isEntitled(roster, machineId, queue, agent) ? 0 : 1);
+  process.exit(isEntitled(roster, machineId, queue, agent, known) ? 0 : 1);
 }
 
-module.exports = { QUEUES, entitlements, agentsForMachine, isEntitled };
+module.exports = { QUEUES, entitlements, agentsForMachine, isEntitled, unknownAgents };

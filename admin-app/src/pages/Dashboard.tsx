@@ -4,7 +4,7 @@ import EmptyState from '../components/EmptyState'
 import { useCollection } from '../hooks/useCollection'
 import { useLoopRuns, useMachines } from '../hooks/useLoopData'
 import { formatRelative, itemRef, ownerLabel, waitingLabel } from '../lib/format'
-import { agentByToken, familyForAgent } from '../lib/agents'
+import { AGENT_FAMILIES, agentByToken, familyForAgent, runnerLabel } from '../lib/agents'
 import type { WorkItem } from '../lib/types'
 import { projectConfig } from '../lib/project-config'
 
@@ -52,11 +52,11 @@ export default function Dashboard() {
         </div>
         <div className="panel agent-snapshot">
           <div className="panel-heading"><div><p className="eyebrow">Automation</p><h2>Agent bench</h2></div><Link to="/loops">Details</Link></div>
-          {['codex', 'claude', 'grok'].map((agent) => {
+          {AGENT_FAMILIES.map((agent) => {
             const running = currentRuns.find((run) => familyForAgent(run.agent) === agent)
             const latest = runs.find((run) => familyForAgent(run.agent) === agent)
             const activeModel = agentByToken(running?.agent || latest?.agent)
-            return <div className="agent-row" key={agent}><div className={`agent-glyph ${agent}`}>{agent.slice(0, 1).toUpperCase()}</div><div><strong>{agent[0].toUpperCase() + agent.slice(1)}</strong><span>{running ? `${activeModel?.short || running.agent} · ${running.activeItem || `${running.queue} loop`}` : latest ? `${activeModel?.short || latest.agent} last ran ${formatRelative(latest.startedAt)}` : 'Models ready for first run'}</span></div><i className={running ? 'live' : ''} /></div>
+            return <div className="agent-row" key={agent}><div className={`agent-glyph ${agent}`}>{agent.slice(0, 1).toUpperCase()}</div><div><strong>{runnerLabel(agent)}</strong><span>{running ? `${activeModel?.short || running.agent} · ${running.activeItem || `${running.queue} loop`}` : latest ? `${activeModel?.short || latest.agent} last ran ${formatRelative(latest.startedAt)}` : 'Models ready for first run'}</span></div><i className={running ? 'live' : ''} /></div>
           })}
           <div className="machine-strip"><span>{projectConfig.automation.defaultMachineLabel}</span><strong>{lastMachine?.status === 'online' ? 'Online' : 'Not yet provisioned'}</strong></div>
         </div>

@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # launchd entry point for one headless loop iteration.
 #
-#   Usage: loop-wrapper.sh <sol|terra|luna|opus|sonnet|fable|grok|configured> <feature|bug|deploy>
+#   Usage: loop-wrapper.sh <agent-token|configured> <feature|bug|deploy>
+#
+# Agent tokens come from project-admin.config.json `agents` (see
+# scripts/lib/agents.js); aliases are canonicalized so codex and terra share
+# one lock and one worktree.
 #
 # Every scheduled fire lands here instead of running run-loop.sh straight out of
 # the shared primary checkout, which AGENTS.md forbids for build work: a loop
@@ -17,7 +21,13 @@ set -uo pipefail
 
 TOKEN="${1:-}"
 QUEUE="${2:-}"
-case "$TOKEN" in sol|terra|luna|opus|sonnet|fable|grok|configured) ;; *) echo "Usage: $0 <sol|terra|luna|opus|sonnet|fable|grok|configured> <feature|bug|deploy>" >&2; exit 2 ;; esac
+AGENTS_HELPER="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/agents.js"
+if [[ "$TOKEN" != "configured" ]]; then
+  TOKEN="$(node "$AGENTS_HELPER" canonical "$TOKEN")" || {
+    echo "Usage: $0 <$(node "$AGENTS_HELPER" tokens --separator '|' 2>/dev/null || echo agent)|configured> <feature|bug|deploy>" >&2
+    exit 2
+  }
+fi
 case "$QUEUE" in feature|bug|deploy) ;; *) echo "Usage: $0 <sol|terra|luna|opus|sonnet|fable|grok|configured> <feature|bug|deploy>" >&2; exit 2 ;; esac
 
 # QoS fix. Every loop plist sets ProcessType=Background, which on Apple Silicon

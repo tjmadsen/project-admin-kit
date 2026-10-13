@@ -5,6 +5,7 @@ const os = require('node:os');
 const { FieldValue, Timestamp } = require('@google-cloud/firestore');
 const db = require('../lib/firestore');
 const { AGENTS, resolveAgent } = require('../lib/agents');
+const { TOKEN_PATTERN } = require('../lib/agent-roster');
 const { claimBelongsToRun, collectionForRun } = require('./run-claims');
 const { handoffConfirmationRequest } = require('./confirmation-handoff');
 const { reapAbandonedRuns } = require('./reap-runs');
@@ -92,8 +93,10 @@ async function main() {
   if (command === 'usage') {
     const provider = options.provider;
     const usedPercent = Number(options['used-percent']);
-    if (!['claude', 'codex'].includes(provider) || !Number.isFinite(usedPercent) || usedPercent < 0 || usedPercent > 100) {
-      throw new Error('Usage: log-run.js usage --provider claude|codex --used-percent 0..100');
+    // Providers are named by the agent's usage hook (claude, codex, or a custom
+    // capture script's own name), so accept any token-shaped key.
+    if (!TOKEN_PATTERN.test(provider || '') || !Number.isFinite(usedPercent) || usedPercent < 0 || usedPercent > 100) {
+      throw new Error('Usage: log-run.js usage --provider <provider> --used-percent 0..100');
     }
     const resetsAt = options['resets-at'] ? new Date(options['resets-at']) : null;
     await db.collection('system').doc('agentLoopUsage').set({
@@ -117,7 +120,7 @@ async function main() {
       'trust_prompt', 'usage_timeout', 'usage_exit', 'pty_error',
       'missing_label', 'parse_error',
     ]);
-    if (!['claude', 'codex'].includes(provider)) throw new Error('Missing or invalid usage provider');
+    if (!TOKEN_PATTERN.test(provider || '')) throw new Error('Missing or invalid usage provider');
     const captureError = allowedReasons.has(options.reason) ? options.reason : 'pty_error';
     await db.collection('system').doc('agentLoopUsage').set({
       [provider]: {

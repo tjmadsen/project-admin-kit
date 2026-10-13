@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import PageHeader from '../components/PageHeader'
 import EmptyState from '../components/EmptyState'
 import { useLoopConfig, useLoopRuns, useLoopUsage, useMachines } from '../hooks/useLoopData'
-import { AGENT_MODELS, agentByToken, type AgentModelToken } from '../lib/agents'
+import { AGENT_FAMILIES, AGENT_MODELS, agentByToken, runnerLabel, type AgentModel, type AgentModelToken } from '../lib/agents'
 import { db } from '../lib/firebase'
 import { formatRelative, toDate } from '../lib/format'
 import type { AgentLoopRun, AgentLoopUsageEntry } from '../lib/types'
@@ -82,6 +82,33 @@ export function usageSummary(entry: AgentLoopUsageEntry | null) {
   return `${captured}${reset}`
 }
 
+export function joinWithAnd(values: readonly string[]) {
+  if (values.length <= 2) return values.join(' and ')
+  return `${values.slice(0, -1).join(', ')}, and ${values.at(-1)}`
+}
+
+export interface UsageGroup { key: string; label: string; detail: string; provider: string | null }
+
+// One card per usage provider (agents sharing a plan share a limit), then one
+// "not exposed" card per runner whose agents have no usage hook at all.
+export function usageGroups(agents: readonly AgentModel[]): UsageGroup[] {
+  const groups = new Map<string, UsageGroup & { shorts: string[] }>()
+  for (const agent of agents) {
+    const key = agent.usageProvider ? `usage:${agent.usageProvider}` : `runner:${agent.runner}`
+    const group = groups.get(key) || { key, label: runnerLabel(agent.usageProvider || agent.runner), detail: '', provider: agent.usageProvider, shorts: [] }
+    group.shorts.push(agent.short)
+    groups.set(key, group)
+  }
+  return [...groups.values()]
+    .sort((a, b) => Number(a.provider === null) - Number(b.provider === null))
+    .map(({ shorts, ...group }) => ({ ...group, detail: shorts.join(' · ') }))
+}
+
+export function guardDescription(agent: Pick<AgentModel, 'guarded' | 'runner' | 'sandbox'>) {
+  if (agent.guarded) return null
+  return `The ${runnerLabel(agent.runner)} runner does not enforce headless-guard.py, so destructive shell commands are not blocked${agent.sandbox ? ` (sandbox: ${agent.sandbox})` : ''}.`
+}
+
 function isFresh(value: unknown, minutes: number, now = Date.now()) {
   const date = toDate(value)
   return Boolean(date && now - date.getTime() < minutes * 60_000)
@@ -143,14 +170,14 @@ export default function AgentLoops({ canManage = true }: { canManage?: boolean }
   }
 
   return <>
-    <PageHeader eyebrow={`${projectConfig.automation.defaultMachineLabel} automation`} title="Agent Loops" description="Fresh-context Codex, Claude, and Grok workers coordinated through the same backlog." action={!canManage && <span className="readonly-badge">Read only</span>} />
+    <PageHeader eyebrow={`${projectConfig.automation.defaultMachineLabel} automation`} title="Agent Loops" description={`Fresh-context ${joinWithAnd(AGENT_FAMILIES.map(runnerLabel))} workers coordinated through the same backlog.`} action={!canManage && <span className="readonly-badge">Read only</span>} />
     {(runError || machineError || configError || usageError) && <div className="error-banner">{runError || machineError || configError || usageError}</div>}
     <section className="panel usage-panel">
       <div className="usage-heading"><div><p className="eyebrow">7-day provider usage</p><h2>Current model usage</h2><p>Shared limits across every model in each provider family, captured by {projectConfig.automation.defaultMachineLabel}.</p></div><small>Refreshes during every loop poll</small></div>
       <div className="usage-grid">
-        <UsageCard provider="Claude" detail="Opus · Sonnet · Fable" entry={usage.claude} />
-        <UsageCard provider="Codex" detail="Sol · Terra · Luna" entry={usage.codex} />
-        <article className="usage-card unavailable"><div><span>Grok</span><strong>—</strong></div><p>Grok Build</p><small>CLI plan usage is not exposed</small><div className="usage-track"><i style={{ width: '0%' }} /></div></article>
+        {usageGroups(AGENT_MODELS).map((group) => group.provider
+          ? <UsageCard key={group.key} provider={group.label} detail={group.detail} entry={usage[group.provider] || null} />
+          : <article className="usage-card unavailable" key={group.key}><div><span>{group.label}</span><strong>—</strong></div><p>{group.detail}</p><small>CLI plan usage is not exposed</small><div className="usage-track"><i style={{ width: '0%' }} /></div></article>)}
       </div>
     </section>
     <section className="panel loop-config-panel">
@@ -164,7 +191,8 @@ export default function AgentLoops({ canManage = true }: { canManage?: boolean }
         const active = current.find((run) => run.agent === agent.token)
         const latest = runs.find((run) => run.agent === agent.token)
         const deployer = config.deployAgent === agent.token
-        return <article className={`loop-agent-card ${deployer ? 'deployer' : ''}`} key={agent.token}><div className={`agent-glyph ${agent.family}`}>{agent.emoji}</div><div><p className="eyebrow">{active ? 'Running now' : deployer ? 'Deploy model' : 'Available'}</p><h2>{agent.label}</h2><p>{active ? `${active.queue} · ${active.activeItem || 'selecting work'}` : latest ? `Last ${latest.status} ${formatRelative(latest.finishedAt || latest.startedAt)}` : agent.model}</p></div><i className={active ? 'live' : ''} /></article>
+        const unguarded = guardDescription(agent)
+        return <article className={`loop-agent-card ${deployer ? 'deployer' : ''}`} key={agent.token}><div className={`agent-glyph ${agent.family}`}>{agent.emoji}</div><div><p className="eyebrow">{active ? 'Running now' : deployer ? 'Deploy model' : 'Available'}{unguarded && <span className="unguarded-badge" title={unguarded} aria-label={`Unguarded: ${unguarded}`}>unguarded</span>}</p><h2>{agent.label}</h2><p>{active ? `${active.queue} · ${active.activeItem || 'selecting work'}` : latest ? `Last ${latest.status} ${formatRelative(latest.finishedAt || latest.startedAt)}` : agent.model}</p></div><i className={active ? 'live' : ''} /></article>
       })}
     </section>
     <section className="dashboard-grid loops-layout">

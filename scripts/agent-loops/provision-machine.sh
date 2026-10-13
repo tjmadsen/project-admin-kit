@@ -10,6 +10,7 @@ MACHINE_ID="${PROJECT_ADMIN_MACHINE_ID:-$DEFAULT_MACHINE_ID}"
 LAUNCH_DIR="$HOME/Library/LaunchAgents"
 LOG_DIRECTORY_NAME="$(node "$REPO_ROOT/scripts/project-env.js" value LOG_DIRECTORY_NAME)"
 LOG_DIR="$HOME/Library/Logs/$LOG_DIRECTORY_NAME"
+AGENTS_HELPER="$REPO_ROOT/scripts/lib/agents.js"
 
 check_binary() {
   local label="$1" binary="$2"
@@ -21,18 +22,30 @@ check_binary() {
   fi
 }
 
+# Each entitled agent's runner adapter locates its own CLI with the same
+# fallbacks the loop uses, so a newly configured runner needs no edit here.
+# Runs in a subshell so the evaluated PA_* fields stay local to one agent.
+check_agent() (
+  local agent="$1" fields found
+  fields="$(node "$AGENTS_HELPER" resolve "$agent" 2>&1)" || { printf '✗ %-10s %s\n' "$agent" "$fields"; exit 1; }
+  eval "$fields"
+  if found="$(PA_CHECK_DEEP=1 PA_COMMAND_JSON="$PA_COMMAND_JSON" "$SCRIPT_DIR/runners/$PA_RUNNER.sh" check 2>&1)"; then
+    printf '✓ %-10s %s (%s)\n' "$agent" "$found" "$PA_RUNNER"
+  else
+    printf '✗ %-10s %s\n' "$agent" "${found:-$PA_RUNNER runner check failed}"
+    exit 1
+  fi
+  [[ "$PA_GUARDED" == "1" ]] || printf '⚠ %-10s unguarded: the %s runner does not enforce headless-guard.py%s\n' "$agent" "$PA_RUNNER" "${PA_SANDBOX:+ (sandbox: $PA_SANDBOX)}"
+)
+
 check() {
-  local failed=0
+  local failed=0 agent
   echo "Project Admin agent-loop readiness"
   check_binary Node node || failed=1
-  check_binary Codex codex || failed=1
-  check_binary Claude claude || failed=1
-  if command -v grok >/dev/null 2>&1 && grok --version >/dev/null 2>&1; then
-    printf '✓ %-10s %s\n' Grok "$(command -v grok)"
-  else
-    echo "✗ Grok       CLI missing or not initialized"
-    failed=1
-  fi
+  while read -r agent; do
+    [[ -n "$agent" ]] || continue
+    check_agent "$agent" || failed=1
+  done < <(node "$SCRIPT_DIR/roster-check.js" --agents "$MACHINE_ID" | tr ',' '\n')
   check_binary timeout timeout || check_binary gtimeout gtimeout || failed=1
   [[ -x "$SCRIPT_DIR/loop-wrapper.sh" ]] && echo "✓ Wrapper    loop-wrapper.sh is executable" || { echo "✗ Wrapper    scripts/agent-loops/loop-wrapper.sh missing or not executable"; failed=1; }
   command -v taskpolicy >/dev/null 2>&1 && echo "✓ taskpolicy loops re-exec at normal QoS" || echo "⚠ taskpolicy missing — loops stay pinned to the E-cores"
@@ -62,8 +75,9 @@ plist() {
   echo "Installed $label ($agent $queue every ${interval}s)"
 }
 
+# Poll cadence is per agent (`pollSeconds` in the roster, default 300).
 interval_for() {
-  [[ "$1" == "grok" ]] && echo 1800 || echo 300
+  node "$AGENTS_HELPER" get "$1" pollSeconds
 }
 
 install_jobs() {

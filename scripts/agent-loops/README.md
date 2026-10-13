@@ -1,22 +1,40 @@
 # Project Admin agent loops
 
 The admin backlog is stored in the Firebase project selected by
-`project-admin.config.json`. Codex, Claude, and Grok share the same queue
-protocol with one selectable owner per model:
+`project-admin.config.json`. Every agent shares the same queue protocol with
+one selectable owner (`<token>-agent`) per configured model. The roster is the
+top-level `agents` array in that file; without one, the built-in roster in
+`scripts/lib/agent-defaults.json` applies:
 
-| Token | Admin owner | Default runner |
-|---|---|---|
-| `sol` | `sol-agent` | Codex `gpt-5.6-sol` |
-| `terra` | `terra-agent` | Codex `gpt-5.6-terra` |
-| `luna` | `luna-agent` | Codex `gpt-5.6-luna` |
-| `opus` | `opus-agent` | Claude Opus |
-| `sonnet` | `sonnet-agent` | Claude Sonnet |
-| `fable` | `fable-agent` | Claude Fable |
-| `grok` | `grok-agent` | Grok CLI print mode |
+| Token | Admin owner | Runner | Model |
+|---|---|---|---|
+| `sol` | `sol-agent` | `codex` | `gpt-5.6-sol` |
+| `terra` | `terra-agent` | `codex` | `gpt-5.6-terra` |
+| `luna` | `luna-agent` | `codex` | `gpt-5.6-luna` |
+| `opus` | `opus-agent` | `claude` | `opus` |
+| `sonnet` | `sonnet-agent` | `claude` | `sonnet` |
+| `fable` | `fable-agent` | `claude` | `fable` |
+| `grok` | `grok-agent` | `grok` | print mode |
 
-Opus also sweeps unassigned work. Every other model claims only explicitly
-owned items. All agents respect `targetMachine`; this installation uses
-`local-mac`.
+`agentAliases` maps shorthand tokens (`codex` → `terra`, `claude` → `sonnet`).
+Opus (`claimsUnassigned: true`) also sweeps unassigned work. Every other model
+claims only explicitly owned items. All agents respect `targetMachine`; this
+installation uses `local-mac`.
+
+Each entry is `{ token, label, short?, emoji?, runner, model,
+claimsUnassigned?, pollSeconds?, sandbox?, usage? }` (plus `command` and
+`promptVia` for the `command` runner). The config loader rejects duplicate or
+malformed tokens, unknown runners or keys, and an
+`automation.defaultWorkAgent`/`defaultDeployAgent` that is not configured.
+`node scripts/lib/agents.js tokens` lists the roster; `resolve <token>` prints
+what the loop will run.
+
+Runners are adapters under `runners/` with one documented contract; see
+[runners/README.md](runners/README.md), including how to add Gemini CLI or any
+other CLI through the generic `command` runner. Only the Claude runner enforces
+`headless-guard.py`. Codex runs with `--sandbox danger-full-access` unless an
+agent sets `sandbox` (`read-only`, `workspace-write`); unguarded agents are
+flagged when the loop starts and on the Agent Loops page.
 
 ## Run once
 
@@ -87,10 +105,12 @@ an apparently idle queue. the project owner gets one macOS notification per thir
 across every loop, debounced through a shared stamp in `~/.project-admin`.
 
 Every poll also refreshes shared seven-day provider usage for the Agent Loops
-dashboard. Codex reads the newest local session rate-limit snapshot. Claude
-uses a bounded `/usage` PTY probe that is serialized and debounced to roughly
-once every 25 minutes. Grok does not expose equivalent plan telemetry through
-its CLI, so the dashboard labels it as unavailable rather than guessing.
+dashboard through the agent's usage hook. Codex reads the newest local session
+rate-limit snapshot. Claude uses a bounded `/usage` PTY probe that is serialized
+and debounced to roughly once every 25 minutes. Grok does not expose equivalent
+plan telemetry through its CLI, so the dashboard labels it as unavailable rather
+than guessing; so does any agent with no hook. An agent can name its own
+`usage` script (see runners/README.md).
 The Claude probe runs from the repository's parent development directory; set
 `CLAUDE_USAGE_WORKDIR` to another already-trusted directory when provisioning a
 different Mac.
@@ -124,10 +144,12 @@ exits 2 on any triple the roster omits, so a hand-copied or stale plist cannot
 poll a queue this machine is no longer entitled to run. `install` enumerates the
 same roster (`roster-check.js --list <machine>`) rather than repeating it, which
 in the sample roster is feature and bug pollers for all seven selectable models
-plus one deploy dispatcher. The dispatcher reads `system/agentLoopConfig` so a
+plus one deploy dispatcher. Roster entries for tokens the config no longer
+defines entitle nothing. `check` asks each entitled agent's runner adapter to
+locate its CLI and flags unguarded agents. The dispatcher reads `system/agentLoopConfig` so a
 dashboard model change takes effect on its next poll. Empty queues are cheap
-no-ops. Standard feature and bug pollers fire every five minutes, Grok pollers
-every thirty minutes, and the deploy dispatcher every fifteen minutes. Logs go
+no-ops. Feature and bug pollers fire every agent's `pollSeconds` (five minutes
+by default, thirty for Grok), and the deploy dispatcher every fifteen minutes. Logs go
 to `~/Library/Logs/ProjectAdminAgentLoops`; per-run transcripts go to the repo's
 ignored `.agent-logs/` directory.
 

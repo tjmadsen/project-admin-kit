@@ -20,6 +20,7 @@ test('configure applies a new project identity across deployable surfaces', (t) 
     'project-admin.config.json', 'firebase.json', 'public/index.html',
     'functions/project-config.json', 'native-ios/ProjectAdminConfig.json',
     'scripts/configure.js', 'scripts/project-env.js', 'scripts/lib/project-config.js',
+    'scripts/lib/agent-roster.js', 'scripts/lib/agent-defaults.json',
     'scripts/agent-loops/machine-roster.json',
   ]) {
     const source = path.join(sourceRoot, relative);
@@ -60,6 +61,8 @@ test('configure applies a new project identity across deployable surfaces', (t) 
     projectName: 'Rocket Notes', ownerEmail: 'owner@example.com', adminBaseUrl: 'https://rocket.example/control',
   });
   assert.equal(readJson(path.join(root, 'scripts/agent-loops/machine-roster.json')).machines[0].repoRoot, fs.realpathSync(root));
+  assert.deepEqual(config.agents, readJson(path.join(sourceRoot, 'project-admin.config.json')).agents, 'configure preserves the agent roster');
+  assert.deepEqual(readJson(path.join(root, 'scripts/agent-loops/machine-roster.json')).machines[0].agents, config.agents.map((agent) => agent.token));
 
   const env = JSON.parse(execFileSync(process.execPath, [path.join(root, 'scripts/project-env.js')], { encoding: 'utf8' }));
   assert.equal(env.PROJECT_ID, 'rocket-notes-prod');

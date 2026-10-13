@@ -14,7 +14,29 @@ const path = require('node:path');
 const { execFileSync, spawnSync } = require('node:child_process');
 
 const AGENT_LOOPS = path.join(__dirname, '..');
+const REPO = path.join(AGENT_LOOPS, '..', '..');
 const REAL_NODE = process.execPath;
+// What run-loop.sh and loop-wrapper.sh need to resolve agents from config.
+const ROSTER_FILES = [
+  'project-admin.config.json',
+  'scripts/lib/agents.js',
+  'scripts/lib/agent-roster.js',
+  'scripts/lib/agent-defaults.json',
+  'scripts/lib/project-config.js',
+];
+
+function copyRosterFiles(root) {
+  for (const relative of ROSTER_FILES) write(path.join(root, relative), fs.readFileSync(path.join(REPO, relative)));
+}
+
+// A project config whose `agents` replace the built-in roster.
+function writeConfig(root, agents, extra = {}) {
+  const config = JSON.parse(fs.readFileSync(path.join(REPO, 'project-admin.config.json'), 'utf8'));
+  delete config.agentAliases;
+  const file = path.join(root, 'custom.config.json');
+  write(file, JSON.stringify({ ...config, agents, ...extra }));
+  return file;
+}
 
 function write(file, contents, mode) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -28,9 +50,11 @@ function makeSandbox() {
   const record = path.join(root, 'record.txt');
   const bin = path.join(root, 'bin');
 
-  for (const script of ['run-loop.sh', 'classify-run-result.js', 'confirmation-handoff.js', 'run-claims.js', 'headless-guard.py']) {
+  for (const script of ['run-loop.sh', 'classify-run-result.js', 'confirmation-handoff.js', 'run-claims.js', 'headless-guard.py',
+    'runners/claude.sh', 'runners/codex.sh', 'runners/grok.sh', 'runners/command.sh']) {
     write(path.join(root, 'scripts/agent-loops', script), fs.readFileSync(path.join(AGENT_LOOPS, script)), 0o755);
   }
+  copyRosterFiles(root);
   for (const queue of ['feature', 'bug', 'deploy']) {
     write(path.join(root, `scripts/agent-loops/${queue}-loop-prompt.md`), `${queue} prompt for {{AGENT}}\n`);
   }
@@ -41,7 +65,7 @@ function makeSandbox() {
 if [[ "\${1:-}" == "-e" ]]; then exec ${REAL_NODE} "$@"; fi
 name="$(basename "\${1:-}")"
 case "$name" in
-  classify-run-result.js) exec ${REAL_NODE} "$@" ;;
+  classify-run-result.js|agents.js) exec ${REAL_NODE} "$@" ;;
   log-run.js)
     echo "LOG_RUN_ARGV: $*" >> ${record}
     case "\${2:-}" in
@@ -64,6 +88,13 @@ exec "$@"
 
   write(path.join(bin, 'codex'), `#!/usr/bin/env bash
 { echo "CODEX_ARGV: $*"; echo "CODEX_STDIN<<"; cat; echo ">>CODEX_STDIN"; } >> ${record}
+`, 0o755);
+
+  // A CLI the kit has never heard of, driven only by a `command` template.
+  // Records each argv element on its own line so word splitting would show.
+  write(path.join(bin, 'fake-cli'), `#!/usr/bin/env bash
+{ echo "FAKE_ARGC: $#"; for arg in "$@"; do echo "FAKE_ARG: $arg"; done
+  echo "FAKE_STDIN<<"; cat; echo ">>FAKE_STDIN"; } >> ${record}
 `, 0o755);
 
   write(path.join(bin, 'claude'), `#!/usr/bin/env bash
@@ -171,6 +202,101 @@ test('a clean run is not mistaken for an auth failure', () => {
   assert.doesNotMatch(record, /NOTIFY: /);
 });
 
+test('Codex runs are announced as unguarded and keep the configured sandbox; Claude runs are not', () => {
+  const codex = runLoop(makeSandbox(), 'sol', 'bug');
+  assert.match(codex.stderr, /WARNING sol uses the codex runner, which does not enforce headless-guard\.py.*sandbox: danger-full-access/);
+  assert.match(codex.record, /CODEX_ARGV: exec --sandbox danger-full-access -m gpt-5\.6-sol -c model_reasoning_effort=medium /);
+
+  const claude = runLoop(makeSandbox(), 'opus', 'bug');
+  assert.doesNotMatch(claude.stderr, /WARNING/);
+  assert.match(claude.record, /CLAUDE_ARGV: -p --model opus --effort medium --dangerously-skip-permissions --settings .*"PreToolUse".*"command":"python3 \S+\/headless-guard\.py"/);
+
+  const sandbox = makeSandbox();
+  const config = writeConfig(sandbox.root, [
+    { token: 'careful', label: 'Careful Codex', runner: 'codex', model: 'gpt-x', sandbox: 'workspace-write' },
+  ], { automation: { ...JSON.parse(fs.readFileSync(path.join(REPO, 'project-admin.config.json'), 'utf8')).automation, defaultWorkAgent: 'careful', defaultDeployAgent: 'careful' } });
+  const careful = runLoop(sandbox, 'careful', 'feature', { PROJECT_ADMIN_CONFIG: config });
+  assert.equal(careful.status, 0, careful.stderr);
+  assert.match(careful.record, /CODEX_ARGV: exec --sandbox workspace-write -m gpt-x /);
+});
+
+test('runner env overrides still win and the recorded effort is the one the CLI gets', () => {
+  const { record } = runLoop(makeSandbox(), 'terra', 'feature', { CODEX_MODEL: 'gpt-override', CODEX_EFFORT: 'low' });
+  assert.match(record, /CODEX_ARGV: .*-m gpt-override -c model_reasoning_effort=low /);
+  assert.match(record, /LOG_RUN_ARGV: .*start --agent terra .*--effort low/);
+});
+
+test('an alias resolves to its canonical agent before anything is recorded', () => {
+  const { status, record } = runLoop(makeSandbox(), 'codex', 'bug');
+  assert.equal(status, 0);
+  assert.match(record, /LOG_RUN_ARGV: .*start --agent terra /);
+  assert.match(record, /CODEX_STDIN<<\nbug prompt for terra\n>>CODEX_STDIN/);
+});
+
+test('an unknown agent is refused with the configured tokens in the usage line', () => {
+  const { status, stderr, record } = runLoop(makeSandbox(), 'gemini', 'bug');
+  assert.equal(status, 2);
+  assert.match(stderr, /Usage: .*<sol\|terra\|luna\|opus\|sonnet\|fable\|grok\|configured>/);
+  assert.doesNotMatch(record, /LOG_RUN_ARGV: .*start/);
+});
+
+test('a missing CLI fails before a run row is created', () => {
+  const sandbox = makeSandbox();
+  fs.rmSync(path.join(sandbox.bin, 'codex'));
+  const { status, stderr, record } = runLoop(sandbox, 'sol', 'bug');
+  assert.equal(status, 1);
+  assert.match(stderr, /Codex CLI not found/);
+  assert.doesNotMatch(record, /LOG_RUN_ARGV: .*start/);
+});
+
+function commandAgentSandbox(agent) {
+  const sandbox = makeSandbox();
+  const automation = { ...JSON.parse(fs.readFileSync(path.join(REPO, 'project-admin.config.json'), 'utf8')).automation, defaultWorkAgent: 'gem', defaultDeployAgent: 'gem' };
+  const config = writeConfig(sandbox.root, [{ token: 'gem', label: 'Gemini', runner: 'command', model: 'gemini-pro', ...agent }], { automation });
+  // A multi-line prompt proves the prompt stays one argument.
+  write(path.join(sandbox.root, 'scripts/agent-loops/feature-loop-prompt.md'), 'line one for {{AGENT}}\nline two\n');
+  return { sandbox, env: { PROJECT_ADMIN_CONFIG: config } };
+}
+
+test('a command-runner agent runs any CLI from its config template with the prompt as one argument', () => {
+  const { sandbox, env } = commandAgentSandbox({
+    command: ['fake-cli', '--model', '{{model}}', '--effort={{effort}}', '--cwd', '{{repo}}', '--prompt', '{{prompt}}'],
+  });
+  const { status, stderr, record } = runLoop(sandbox, 'gem', 'feature', env);
+  assert.equal(status, 0, stderr);
+  assert.match(stderr, /WARNING gem uses the command runner/);
+  assert.match(record, /FAKE_ARGC: 7\n/);
+  assert.match(record, /FAKE_ARG: --model\nFAKE_ARG: gemini-pro\nFAKE_ARG: --effort=medium\nFAKE_ARG: --cwd\nFAKE_ARG: \S+\nFAKE_ARG: --prompt\nFAKE_ARG: line one for gem\nline two\n/);
+  assert.match(record, /FAKE_STDIN<<\n>>FAKE_STDIN/, 'stdin is closed when the prompt travels as an argument');
+  assert.match(record, /TIMEOUT_ARGS: --signal=TERM --kill-after=30s 14400 /, 'the outer wall still wraps the adapter');
+});
+
+test('a command-runner agent can take the prompt on stdin or as a file path', () => {
+  const stdin = commandAgentSandbox({ command: ['fake-cli', 'run'], promptVia: 'stdin' });
+  const viaStdin = runLoop(stdin.sandbox, 'gem', 'feature', stdin.env);
+  assert.equal(viaStdin.status, 0, viaStdin.stderr);
+  assert.match(viaStdin.record, /FAKE_ARGC: 1\n/);
+  assert.match(viaStdin.record, /FAKE_STDIN<<\nline one for gem\nline two\n>>FAKE_STDIN/);
+
+  const file = commandAgentSandbox({ command: ['fake-cli', '--prompt-file', '{{prompt_file}}'] });
+  const viaFile = runLoop(file.sandbox, 'gem', 'feature', file.env);
+  assert.equal(viaFile.status, 0, viaFile.stderr);
+  assert.match(viaFile.record, /FAKE_ARG: \S+\/\.agent-logs\/feature-gem-run-test-1\.prompt\.md\n/);
+});
+
+test('the command runner propagates the CLI exit code and the usage hook is per agent', () => {
+  const { sandbox, env } = commandAgentSandbox({
+    command: ['fake-cli', '{{prompt}}'],
+    usage: { provider: 'gemini', script: 'usage-hook.sh' },
+  });
+  write(path.join(sandbox.bin, 'fake-cli'), '#!/usr/bin/env bash\necho "boom"\nexit 3\n', 0o755);
+  write(path.join(sandbox.root, 'usage-hook.sh'), `#!/usr/bin/env bash\necho "USAGE_HOOK: $PA_USAGE_PROVIDER" >> ${sandbox.record}\n`, 0o755);
+  const { status, record } = runLoop(sandbox, 'gem', 'feature', env);
+  assert.equal(status, 3);
+  assert.match(record, /LOG_RUN_ARGV: .*finish .*--code 3/);
+  assert.match(record, /USAGE_HOOK: gemini/);
+});
+
 // --- loop-wrapper.sh -------------------------------------------------------
 
 function makeWrapperSandbox() {
@@ -189,6 +315,7 @@ function makeWrapperSandbox() {
 echo "RUN_LOOP: agent=$1 queue=$2 mode=$3 cwd=$PWD self=$0" >> ${record}
 `, 0o755);
   write(path.join(repo, '.gitignore'), '.agent-worktrees/\nnode_modules/\n');
+  copyRosterFiles(repo);
   fs.mkdirSync(path.join(repo, 'scripts/node_modules'), { recursive: true });
   git(repo, 'add', '-A');
   git(repo, 'commit', '-m', 'initial');
@@ -248,8 +375,18 @@ test('the wrapper refreshes its worktree to the configured default branch on eve
 
 test('the wrapper rejects an unknown token or queue', () => {
   const sandbox = makeWrapperSandbox();
-  assert.equal(runWrapper(sandbox, 'nobody', 'bug').status, 2);
+  const unknown = runWrapper(sandbox, 'nobody', 'bug');
+  assert.equal(unknown.status, 2);
+  assert.match(unknown.stderr, /<sol\|terra\|luna\|opus\|sonnet\|fable\|grok\|configured>/);
   assert.equal(runWrapper(sandbox, 'opus', 'release').status, 2);
+});
+
+test('the wrapper canonicalizes an alias so it shares the agent\'s lock and worktree', () => {
+  const sandbox = makeWrapperSandbox();
+  const { status, record } = runWrapper(sandbox, 'codex', 'bug');
+  assert.equal(status, 0);
+  assert.match(record, /RUN_LOOP: agent=terra queue=bug/);
+  assert.ok(fs.existsSync(path.join(sandbox.repo, '.agent-worktrees/loop-bug-terra')));
 });
 
 test('launchd points at the wrapper and the wrapper restores normal QoS once', () => {

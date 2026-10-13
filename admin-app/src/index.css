@@ -685,6 +685,7 @@ a { color: inherit; text-decoration: none; }
 .loop-agent-card { min-height: 130px; padding: 20px; display: grid; grid-template-columns: 43px 1fr 8px; align-items: center; gap: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 11px; }
 .loop-agent-card .agent-glyph { width: 43px; height: 43px; }
 .loop-agent-card .eyebrow { margin-bottom: 4px; }
+.unguarded-badge { display: inline-block; margin-left: 8px; padding: 1px 6px; border: 1px solid var(--warning-line); border-radius: 999px; background: var(--warning-soft); color: var(--warning-ink); font-size: 10px; letter-spacing: .04em; text-transform: lowercase; cursor: help; }
 .loop-agent-card h2 { margin: 0; font-size: 16px; }
 .loop-agent-card p:last-child { margin: 6px 0 0; color: var(--ink-quiet); font-size: var(--type-meta); }
 .loop-agent-card.deployer { border-color: var(--info-line-strong); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--info-line-strong) 17%, transparent); }

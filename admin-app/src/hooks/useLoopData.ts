@@ -2,7 +2,10 @@ import { useEffect, useState } from 'react'
 import { collection, doc, limit, onSnapshot, orderBy, query } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { DEFAULT_DEPLOY_AGENT } from '../lib/agents'
-import type { AgentLoopConfig, AgentLoopRun, AgentLoopUsage, AgentMachine } from '../lib/types'
+import type { AgentLoopConfig, AgentLoopRun, AgentLoopUsage, AgentLoopUsageEntry, AgentMachine } from '../lib/types'
+
+/** Usage by provider: claude and codex today, plus any configured usage hook. */
+export type LoopUsage = AgentLoopUsage & Record<string, AgentLoopUsageEntry | null>
 
 export function useLoopRuns(max = 100) {
   const [runs, setRuns] = useState<AgentLoopRun[]>([])
@@ -40,12 +43,12 @@ export function useLoopConfig() {
 }
 
 export function useLoopUsage() {
-  const [usage, setUsage] = useState<AgentLoopUsage>({ claude: null, codex: null })
+  const [usage, setUsage] = useState<LoopUsage>({ claude: null, codex: null })
   const [error, setError] = useState('')
   useEffect(() => onSnapshot(doc(db, 'system', 'agentLoopUsage'),
     (snapshot) => {
-      const value = snapshot.data() as Partial<AgentLoopUsage> | undefined
-      setUsage({ claude: value?.claude || null, codex: value?.codex || null })
+      const value = snapshot.data() as Partial<LoopUsage> | undefined
+      setUsage({ ...value, claude: value?.claude || null, codex: value?.codex || null })
       setError('')
     },
     (err) => setError(err.message),

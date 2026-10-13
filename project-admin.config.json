@@ -36,6 +36,70 @@
     "stateDirectory": ".project-admin",
     "logDirectoryName": "ProjectAdminAgentLoops"
   },
+  "agents": [
+    {
+      "token": "sol",
+      "label": "Codex Sol",
+      "short": "Sol",
+      "emoji": "☀️",
+      "runner": "codex",
+      "model": "gpt-5.6-sol"
+    },
+    {
+      "token": "terra",
+      "label": "Codex Terra",
+      "short": "Terra",
+      "emoji": "🌍",
+      "runner": "codex",
+      "model": "gpt-5.6-terra"
+    },
+    {
+      "token": "luna",
+      "label": "Codex Luna",
+      "short": "Luna",
+      "emoji": "🌙",
+      "runner": "codex",
+      "model": "gpt-5.6-luna"
+    },
+    {
+      "token": "opus",
+      "label": "Claude Opus",
+      "short": "Opus",
+      "emoji": "◆",
+      "runner": "claude",
+      "model": "opus",
+      "claimsUnassigned": true
+    },
+    {
+      "token": "sonnet",
+      "label": "Claude Sonnet",
+      "short": "Sonnet",
+      "emoji": "⚡",
+      "runner": "claude",
+      "model": "sonnet"
+    },
+    {
+      "token": "fable",
+      "label": "Claude Fable",
+      "short": "Fable",
+      "emoji": "◇",
+      "runner": "claude",
+      "model": "fable"
+    },
+    {
+      "token": "grok",
+      "label": "Grok",
+      "short": "Grok",
+      "emoji": "✕",
+      "runner": "grok",
+      "model": "grok",
+      "pollSeconds": 1800
+    }
+  ],
+  "agentAliases": {
+    "codex": "terra",
+    "claude": "sonnet"
+  },
   "deployments": {
     "firebaseHosting": true,
     "firebaseFunctions": true,

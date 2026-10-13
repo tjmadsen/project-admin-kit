@@ -51,6 +51,58 @@
     "deployments": {
       "type": "object",
       "additionalProperties": { "type": "boolean" }
+    },
+    "agents": {
+      "description": "Selectable loop agents. Omit to use the built-in roster in scripts/lib/agent-defaults.json. Each agent's queue owner is <token>-agent.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/agent" }
+    },
+    "agentAliases": {
+      "description": "Legacy or shorthand tokens mapped to a configured agent token, e.g. { \"codex\": \"terra\" }.",
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z0-9][a-z0-9-]*$" },
+      "additionalProperties": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" }
+    }
+  },
+  "$defs": {
+    "agent": {
+      "type": "object",
+      "required": ["token", "label", "runner", "model"],
+      "additionalProperties": false,
+      "properties": {
+        "token": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$", "not": { "const": "configured" } },
+        "label": { "type": "string", "minLength": 1 },
+        "short": { "type": "string", "minLength": 1 },
+        "emoji": { "type": "string", "minLength": 1 },
+        "runner": { "enum": ["claude", "codex", "grok", "command"] },
+        "model": { "type": "string", "minLength": 1 },
+        "claimsUnassigned": { "type": "boolean", "description": "Also claim work with no assigned owner." },
+        "pollSeconds": { "type": "integer", "minimum": 1, "description": "launchd poll interval for this agent's build loops (default 300)." },
+        "sandbox": { "enum": ["read-only", "workspace-write", "danger-full-access"], "description": "Codex --sandbox mode (default danger-full-access)." },
+        "usage": {
+          "description": "Usage-capture hook run on every poll; false disables the runner's default.",
+          "oneOf": [
+            { "const": false },
+            {
+              "type": "object",
+              "required": ["provider", "script"],
+              "additionalProperties": false,
+              "properties": {
+                "provider": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+                "script": { "type": "string", "minLength": 1 }
+              }
+            }
+          ]
+        },
+        "command": {
+          "description": "command runner only: argv template; placeholders {{prompt}}, {{prompt_file}}, {{model}}, {{effort}}, {{repo}}.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "promptVia": { "enum": ["arg", "stdin"], "description": "command runner only: pass the prompt through the template (arg) or on stdin." }
+      }
     }
   }
 }

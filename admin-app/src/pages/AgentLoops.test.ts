@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentLoopRun, AgentLoopUsageEntry } from '../lib/types'
-import { formatLoopDuration, runDuration, runItemPath, runOutcome, usageStatus, usageSummary } from './AgentLoops'
+import { formatLoopDuration, guardDescription, joinWithAnd, runDuration, runItemPath, runOutcome, usageGroups, usageStatus, usageSummary } from './AgentLoops'
+import { AGENT_MODELS, agentByToken } from '../lib/agents'
 
 const timestamp = (date: Date) => ({ toDate: () => date })
 
@@ -81,5 +82,26 @@ describe('Agent Loops run details', () => {
     expect(runItemPath({ activeItem: 'FR-29', activeCollection: 'featureRequests' })).toBe('/features?item=FR-29')
     expect(runItemPath({ activeItem: 'BUG-16' })).toBe('/bugs?item=BUG-16')
     expect(runItemPath({ activeItem: 'selecting work' })).toBeNull()
+  })
+})
+
+describe('Agent Loops roster presentation', () => {
+  it('groups usage cards by provider and lists runners without telemetry last', () => {
+    expect(usageGroups(AGENT_MODELS).map(({ label, detail, provider }) => ({ label, detail, provider }))).toEqual([
+      { label: 'Codex', detail: 'Sol · Terra · Luna', provider: 'codex' },
+      { label: 'Claude', detail: 'Opus · Sonnet · Fable', provider: 'claude' },
+      { label: 'Grok', detail: 'Grok', provider: null },
+    ])
+  })
+
+  it('describes unguarded runners and stays quiet for guarded ones', () => {
+    expect(guardDescription(agentByToken('opus')!)).toBeNull()
+    expect(guardDescription(agentByToken('sol')!)).toMatch(/Codex runner does not enforce headless-guard\.py.*sandbox: danger-full-access/)
+    expect(guardDescription(agentByToken('grok')!)).toMatch(/Grok runner/)
+  })
+
+  it('joins runner names for the page description', () => {
+    expect(joinWithAnd(['Codex', 'Claude', 'Grok'])).toBe('Codex, Claude, and Grok')
+    expect(joinWithAnd(['Claude'])).toBe('Claude')
   })
 })

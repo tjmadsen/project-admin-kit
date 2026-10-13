@@ -4,6 +4,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { ROOT, CONFIG_PATH, loadProjectConfig } = require('./lib/project-config');
+const { normalizeRoster } = require('./lib/agent-roster');
 
 const FLAG_PATHS = {
   name: ['project', 'name'], shortName: ['project', 'shortName'], slug: ['project', 'slug'],
@@ -89,7 +90,7 @@ function main() {
     id: config.automation.defaultMachineId,
     label: config.automation.defaultMachineLabel,
     repoRoot: ROOT,
-    agents: ['sol', 'terra', 'luna', 'opus', 'sonnet', 'fable', 'grok'],
+    agents: Object.keys(normalizeRoster(config).agents),
     queues: ['feature', 'bug', 'deploy'],
   }] });
   updateMarketingPage(config);
