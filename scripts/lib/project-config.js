@@ -34,13 +34,17 @@ function resolveBackend(config) {
 }
 
 function loadProjectConfig() {
-  const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-  if (config.schemaVersion !== 1) throw new Error(`Unsupported project admin config schema in ${CONFIG_PATH}`);
+  return validateProjectConfig(JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')));
+}
+
+// Throws on the first problem; `source` names the file in messages.
+function validateProjectConfig(config, source = CONFIG_PATH) {
+  if (config.schemaVersion !== 1) throw new Error(`Unsupported project admin config schema in ${source}`);
   let backend;
   try {
     backend = resolveBackend(config);
   } catch (error) {
-    throw new Error(`${error.message} (${CONFIG_PATH})`);
+    throw new Error(`${error.message} (${source})`);
   }
   // Firebase identity is required only when Firestore is the store.
   const firebaseRequired = backend.type === 'firestore'
@@ -54,18 +58,18 @@ function loadProjectConfig() {
     ['automation.defaultMachineId', config.automation?.defaultMachineId],
   ]) {
     if (!value || typeof value !== 'string') {
-      throw new Error(`Missing ${label} in ${CONFIG_PATH}${firebaseRequired.some(([name]) => name === label) ? ' (required by the firestore backend)' : ''}`);
+      throw new Error(`Missing ${label} in ${source}${firebaseRequired.some(([name]) => name === label) ? ' (required by the firestore backend)' : ''}`);
     }
   }
   // Fail at load time, not mid-loop, when `agents`/`agentAliases` are invalid.
   try {
     normalizeRoster(config);
   } catch (error) {
-    throw new Error(`${error.message} (${CONFIG_PATH})`);
+    throw new Error(`${error.message} (${source})`);
   }
   // Lazy require: work-kinds.js itself loads this module.
   if (config.workKinds !== undefined) require('./work-kinds').resolveWorkKinds(config.workKinds);
   return config;
 }
 
-module.exports = { BACKEND_TYPES, CONFIG_PATH, FIREBASE_WEB_KEYS, ROOT, loadProjectConfig, resolveBackend };
+module.exports = { BACKEND_TYPES, CONFIG_PATH, FIREBASE_WEB_KEYS, ROOT, loadProjectConfig, resolveBackend, validateProjectConfig };

@@ -3,7 +3,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { ROOT, CONFIG_PATH, loadProjectConfig, resolveBackend } = require('./lib/project-config');
+const { ROOT, CONFIG_PATH, resolveBackend, validateProjectConfig } = require('./lib/project-config');
 const { normalizeRoster } = require('./lib/agent-roster');
 const { loadWorkKinds, queueNames, syncDerivedFiles } = require('./lib/work-kinds');
 
@@ -79,12 +79,14 @@ function main() {
     console.log('  --backend github [--github-repo owner/repo] [--label-prefix pa:]   no Firebase keys needed');
     return;
   }
-  const config = loadProjectConfig();
+  // Validated after the flags apply, so --backend can drop Firebase requirements.
+  const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
   applyBackend(config, flags);
   for (const [flag, keys] of Object.entries(FLAG_PATHS)) if (typeof flags[flag] === 'string') setPath(config, keys, flags[flag]);
   if (typeof flags.name === 'string' && typeof flags.shortName !== 'string') config.project.shortName = flags.name;
   if (typeof flags.name === 'string' && typeof flags.slug !== 'string') config.project.slug = flags.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   if (typeof flags.firebaseProject === 'string') {
+    config.firebase ||= {};
     if (!flags.authDomain) config.firebase.authDomain = `${flags.firebaseProject}.firebaseapp.com`;
     if (!flags.storageBucket) config.firebase.storageBucket = `${flags.firebaseProject}.firebasestorage.app`;
   }
@@ -93,7 +95,7 @@ function main() {
   // Re-validate the edited config (backend-specific requirements included)
   // before anything is written.
   const backend = resolveBackend(config);
-  if (backend.type === 'firestore' && !config.project.firebaseProjectId) throw new Error('The firestore backend needs --firebase-project');
+  validateProjectConfig(config);
   writeJson(CONFIG_PATH, config);
   if (config.project.firebaseProjectId) writeJson(path.join(ROOT, '.firebaserc'), { projects: { default: config.project.firebaseProjectId } });
   const firebaseConfig = JSON.parse(fs.readFileSync(path.join(ROOT, 'firebase.json'), 'utf8'));
@@ -127,7 +129,6 @@ function main() {
   updateMarketingPage(config);
   // Rules, Functions, and the iOS wrapper carry generated copies of workKinds.
   syncDerivedFiles({ root: ROOT, kinds: loadWorkKinds(config) });
-  loadProjectConfig(); // throws if the written config is invalid for its backend
   console.log(`Configured ${config.project.name} (${backend.type} backend). Next: ${NEXT_STEPS[backend.type]}`);
 }
 
