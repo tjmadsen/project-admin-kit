@@ -5,11 +5,17 @@
 #
 #   scripts/agent-loops/provision-worktree.sh <worktree-path> [--dry-run]
 #
+# The worktree is a checkout of the product repository. The kit's own state
+# (auth.env, its node_modules) lives under the kit's subdirectory of it
+# (KIT_SUBDIR, docs/LAYOUTS.md: "." by default, "ops" when embedded); a kit in a
+# separate repository runs from its own checkout, so only product state applies.
+#
 # Idempotent: safe to re-run when resuming a branch. --dry-run prints the plan
 # (one "<action> <path>" line each) and changes nothing.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+KIT_SUBDIR="${PROJECT_ADMIN_KIT_SUBDIR-$(node "$SCRIPT_DIR/../project-env.js" value KIT_SUBDIR 2>/dev/null || echo .)}"
 # Tests and automation may supply an isolated primary fixture. Otherwise the
 # shared checkout owns the gitignored state, so resolve it from the common dir.
 if [[ -n "${PROJECT_ADMIN_PRIMARY_ROOT:-}" ]]; then
@@ -32,9 +38,14 @@ TARGET="$(cd "$TARGET" && pwd)"
 
 # Gitignored local config the primary checkout owns. Missing entries are skipped
 # rather than fatal, so this list can name optional credentials.
-CONFIG_FILES=(auth.env)
+CONFIG_FILES=()
 # Directories whose node_modules the worktree needs to run its suite.
-NODE_PACKAGES=(scripts admin-app functions)
+NODE_PACKAGES=()
+case "$KIT_SUBDIR" in
+  "") ;;
+  .) CONFIG_FILES=(auth.env); NODE_PACKAGES=(scripts admin-app extras/functions) ;;
+  *) CONFIG_FILES=("$KIT_SUBDIR/auth.env"); NODE_PACKAGES=("$KIT_SUBDIR/scripts" "$KIT_SUBDIR/admin-app" "$KIT_SUBDIR/extras/functions") ;;
+esac
 
 plan() { printf '%s %s\n' "$1" "$2"; }
 
@@ -81,6 +92,8 @@ provision_flutter() {
   done < <(comm -13 <(sort <<<"$before") <(sort <<<"$after"))
 }
 
-for config in "${CONFIG_FILES[@]}"; do link_config "$config"; done
-for package in "${NODE_PACKAGES[@]}"; do provision_node_package "$package"; done
+[[ -n "$KIT_SUBDIR" ]] || plan skip "kit packages (separate layout: the kit runs from its own checkout)"
+# ${arr[@]+...}: an empty array is an unbound variable under set -u in bash 3.2.
+for config in ${CONFIG_FILES[@]+"${CONFIG_FILES[@]}"}; do link_config "$config"; done
+for package in ${NODE_PACKAGES[@]+"${NODE_PACKAGES[@]}"}; do provision_node_package "$package"; done
 provision_flutter

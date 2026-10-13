@@ -14,6 +14,10 @@ Firestore needs a Firebase project; [BACKENDS.md](BACKENDS.md) gives the setup
 for the other two, and the rest of this guide applies to all three except
 where it names Firebase.
 
+To add the kit to an existing product repository (in a subdirectory) or keep
+it in a separate repository beside the product, start with
+[LAYOUTS.md](LAYOUTS.md); the steps below then run in the kit directory.
+
 ## 1. Create Firebase resources
 
 Create a Firebase project, a Web app, Firestore, Storage, and a Hosting site.
@@ -24,13 +28,15 @@ The configuration command updates:
 
 - `project-admin.config.json` for the web console and Node tools;
 - `.firebaserc` and `firebase.json` for deployment;
-- `functions/project-config.json` for notification branding;
-- `native-ios/ProjectAdminConfig.json` for the optional wrapper;
+- `extras/functions/project-config.json` for notification branding;
+- `extras/native-ios/ProjectAdminConfig.json` for the optional wrapper
+  (both only when `extras/` is present; see `extras/README.md`);
 - the machine roster and placeholder marketing page.
 
 ## 2. Install and bootstrap
 
-Run `npm run install:all`, authenticate Application Default Credentials with
+Run `npm run install:all` (plus `npm run install:extras` if you use the
+lifecycle Functions), authenticate Application Default Credentials with
 `gcloud auth application-default login`, then run `npm run bootstrap-admin`.
 The owner email from project configuration becomes the first active admin.
 
@@ -43,7 +49,8 @@ collaborators are the access list.
 
 ## 3. Verify locally
 
-Run `npm test`, `npm run test:rules`, and `npm run build`. Start the Hosting and
+Run `npm test`, `npm run test:rules`, and `npm run build` (and
+`npm run test:extras` when you keep the extras). Start the Hosting and
 Firestore emulators for interactive work, or use `npm --prefix admin-app run dev`
 against a development Firebase project.
 
@@ -99,44 +106,7 @@ TestFlight to any approved target set.
 
 ## Upgrading
 
-### From boolean `deployments` flags to `deployments.targets`
-
-The earlier `"deployments": { "firebaseHosting": true, ... }` map still loads
-and keeps every built-in target available, as before. To make the flags real,
-print the equivalent `targets` map and paste it over the old block:
-
-```bash
-node scripts/lib/deploy-targets.js migrate
-```
-
-Each `false` becomes `"enabled": false`, which hides that target from the
-console picker and rejects it in new `deploy-pending --targets`; items that
-already recorded it keep resolving.
-
-### From separate `featureRequests`/`bugs` collections to `workItems`
-
-Earlier releases stored each kind in its own collection. All kinds now live in
-one `workItems` collection with a `kind` field. Counter fields are unchanged
-(`nextFeatureNumber`, `nextBugNumber`), so numbering continues.
-
-1. Pause the loops (`scripts/agent-loops/provision-machine.sh uninstall`, or
-   stop `npm run loops`) so nothing writes the legacy collections mid-copy.
-2. Preview the copy, then apply it with Application Default Credentials:
-
-   ```bash
-   npm run migrate:work-items            # dry run: prints what would be copied
-   npm run migrate:work-items -- --apply # copies into workItems
-   ```
-
-   Each document keeps its id (so `dependsOn` links still resolve), gains
-   `kind` and a `migratedFrom` marker, and is never overwritten if it already
-   exists. Re-running is safe; a non-zero exit lists id conflicts to resolve by
-   hand. The legacy collections are left untouched for rollback.
-3. Deploy the new rules and console:
-   `firebase deploy --only hosting,firestore:rules,storage --project <id>`.
-4. If lifecycle notifications are enabled, deploy `notifyWorkItemLifecycle`
-   and delete the old triggers:
-   `firebase functions:delete notifyFeatureLifecycle notifyBugLifecycle`.
-   Migrated copies carry `migratedFrom`, so they do not send notifications.
-5. Reload the loops (`provision-machine.sh install`). Once you are satisfied, delete the legacy collections from
-   the Firebase console.
+Pull later kit releases with `npm run kit:upgrade` (a 3-way merge that never
+touches project-owned files) and follow the per-release migrations (work-item
+collections, deploy-target config, scheduler job names, the `extras/` move) in
+[UPGRADING.md](UPGRADING.md). `CHANGELOG.md` lists breaking changes.

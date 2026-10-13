@@ -7,7 +7,7 @@ firebase-debug.log
 firestore-debug.log
 ui-debug.log
 admin-app/.env.local
-native-ios/GoogleService-Info.plist
-native-ios/*.xcodeproj/
+extras/native-ios/GoogleService-Info.plist
+extras/native-ios/*.xcodeproj/
 *.xcarchive
 .DS_Store

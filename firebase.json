@@ -1,6 +1,6 @@
 {
   "functions": {
-    "source": "functions",
+    "source": "extras/functions",
     "runtime": "nodejs20",
     "predeploy": [
       "npm --prefix \"$RESOURCE_DIR\" test"

@@ -7,6 +7,8 @@
 #   docker run --rm -it -v "$PWD:/repo" ... project-admin-loops
 #
 # Only the CLIs your configured `agents` use need to be installed; drop the rest.
+# With a separate kit repository (docs/LAYOUTS.md) mount both checkouts at the
+# same relative positions so layout.productRoot still resolves.
 # TestFlight releases need macOS and are not available here.
 FROM node:20-bookworm-slim
 

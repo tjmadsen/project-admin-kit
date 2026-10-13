@@ -45,7 +45,7 @@ test('every configured and built-in deploy target has a complete runbook', () =>
 test('the deploy runbook is generic and reads each approved target\'s runbook from config', () => {
   const runbook = read('.claude/commands/deploy-loop.md');
   assert.doesNotMatch(runbook, /^## Target:/m, 'per-target procedures live in their runbook files');
-  assert.match(runbook, /node scripts\/lib\/deploy-targets\.js show/);
+  assert.match(runbook, /node "\$KIT_ROOT\/scripts\/lib\/deploy-targets\.js" show/);
   assert.match(runbook, /deployments\.targets/);
   assert.match(runbook, /requiresHumanAcceptance/);
 });
@@ -94,10 +94,10 @@ test('every build runbook carries the worktree pre-flight, branch reuse, and not
     const text = read(runbook);
     assert.match(
       text,
-      /scripts\/agent-loops\/provision-worktree\.sh \.agent-worktrees\//,
+      /"\$KIT_ROOT\/scripts\/agent-loops\/provision-worktree\.sh" "\$PRODUCT_ROOT\/\.agent-worktrees\//,
       `${runbook} must provision the worktree after git worktree add`
     );
-    assert.match(text, /git worktree add \.agent-worktrees\//, `${runbook} must create the worktree explicitly`);
+    assert.match(text, /git -C "\$PRODUCT_ROOT" worktree add "\$PRODUCT_ROOT\/\.agent-worktrees\//, `${runbook} must create the worktree explicitly in the product repository`);
     assert.match(text, /auth\.env[\s\S]{0,80}node_modules/, `${runbook} must say what a fresh checkout is missing`);
     assert.match(
       text,
@@ -133,11 +133,29 @@ test('release handoffs use durable PR scope and preserve approval for mechanical
   assert.match(read('docs/deploy-targets/none.md'), /item-specific focused tests from\s+the merged deploy worktree/i);
 });
 
+// docs/LAYOUTS.md: the kit may be embedded in, or separate from, the product
+// repository, so runbooks reach kit CLIs through $KIT_ROOT and make worktrees
+// in $PRODUCT_ROOT rather than assuming both are the working directory.
+test('runbooks and prompt shims resolve kit paths through the layout, never the working directory', () => {
+  const runbooks = [...new Set([...buildRunbooks, '.claude/commands/deploy-loop.md'])];
+  for (const runbook of runbooks) {
+    const text = read(runbook);
+    assert.match(text, /eval "\$\(node "\$\{PROJECT_ADMIN_KIT_ROOT:-\.\}\/scripts\/project-env\.js" shell\)" && cd "\$PRODUCT_ROOT"/, `${runbook} must load the layout first`);
+    assert.doesNotMatch(text, /(?<![\w/$}"])(?:node )?scripts\/[\w/-]+\.(?:js|sh)/, `${runbook} must reach kit scripts through $KIT_ROOT`);
+    assert.doesNotMatch(text, /(?<![\w/"])\.agent-worktrees\/</, `${runbook} must place worktrees under $PRODUCT_ROOT`);
+  }
+  for (const prompt of ['scripts/agent-loops/deploy-loop-prompt.md', ...kinds.map(promptFor)]) {
+    assert.match(read(prompt), /`\{\{KIT_ROOT\}\}\/\.claude\/commands\//, `${prompt} must point at the runbook inside the kit`);
+  }
+  const deploy = read('.claude/commands/deploy-loop.md');
+  assert.match(deploy, /DEPLOY_KIT=/, 'the deploy runbook must define the kit inside the release worktree');
+});
+
 test('AGENTS.md carries the runnable test matrix and CLAUDE.md defers to it', () => {
   const agents = read('AGENTS.md');
   for (const command of [
     'cd admin-app && npm test',
-    'cd functions && npm test',
+    'cd extras/functions && npm test',
     'cd scripts && npm test',
     'firebase emulators:exec --only firestore,storage',
     'node scripts/work-agent.js --kind feature count --as terra',
@@ -154,7 +172,7 @@ test('AGENTS.md carries the runnable test matrix and CLAUDE.md defers to it', ()
 test('runbooks for kinds that never deploy contain no release handoff', () => {
   for (const kind of kinds.filter((entry) => !entry.deploys)) {
     const runbook = read(kind.runbook);
-    assert.doesNotMatch(runbook, /node scripts\/[\w-]+\.js deploy-pending/, `${kind.runbook} must not hand off to the deploy loop`);
+    assert.doesNotMatch(runbook, /scripts\/[\w-]+\.js"? deploy-pending/, `${kind.runbook} must not hand off to the deploy loop`);
     assert.match(runbook, /close-no-deploy/, `${kind.runbook} must close through close-no-deploy`);
   }
 });

@@ -53,9 +53,15 @@ On macOS the wrapper re-execs once under `taskpolicy -a` (so
 sources the optional `~/<stateDirectory>/loops.env` (for per-host secrets such
 as a webhook URL or a container's CLI API keys), holds a single-instance lock
 per `(project,queue,token)` under `~/.project-admin`, refreshes a dedicated
-`.agent-worktrees/loop-<queue>-<token>` checkout to the configured default branch, links the
-gitignored `node_modules` installs, and runs that checkout's `run-loop.sh`. No
-loop ever works in the shared primary checkout.
+`.agent-worktrees/loop-<queue>-<token>` checkout of the product repository to the
+configured default branch, links the gitignored `node_modules` installs, and
+runs that checkout's `run-loop.sh` (an embedded kit's copy at
+`<worktree>/<kit dir>`; a separate kit runs its own `run-loop.sh` with
+`PROJECT_ADMIN_PRODUCT_ROOT` pointing at the worktree, see
+[docs/LAYOUTS.md](../../docs/LAYOUTS.md)). The agent starts in the product
+checkout with `PROJECT_ADMIN_KIT_ROOT` and `PROJECT_ADMIN_PRODUCT_ROOT` set, and
+prompts substitute `{{KIT_ROOT}}`. No loop ever works in the shared primary
+checkout.
 
 To drive one iteration by hand, call the runner directly:
 
@@ -124,9 +130,13 @@ different Mac.
 ## Provision a worktree
 
 ```bash
-git worktree add .agent-worktrees/<agent>-fr-N "origin/$DEFAULT_BRANCH" -b <agent>/fr-N
-scripts/agent-loops/provision-worktree.sh .agent-worktrees/<agent>-fr-N
+eval "$(node scripts/project-env.js shell)"
+git -C "$PRODUCT_ROOT" worktree add "$PRODUCT_ROOT/.agent-worktrees/<agent>-fr-N" "origin/$DEFAULT_BRANCH" -b <agent>/fr-N
+scripts/agent-loops/provision-worktree.sh "$PRODUCT_ROOT/.agent-worktrees/<agent>-fr-N"
 ```
+
+`PRODUCT_ROOT` is the kit directory itself unless the kit is embedded in or
+separate from the product repository ([docs/LAYOUTS.md](../../docs/LAYOUTS.md)).
 
 A fresh checkout has none of the gitignored local state, so the backlog CLI and
 every suite fail there until this runs. It symlinks `auth.env` and each
@@ -185,7 +195,8 @@ default, thirty for Grok), and the deploy dispatcher every fifteen minutes.
 
 On Linux the loops need GNU coreutils `timeout`; `run-loop.sh` puts a
 `gtimeout` alias on the agent's PATH because the runbooks use Homebrew's name.
-TestFlight releases (`launch-testflight.sh`) remain macOS-only.
+TestFlight releases (the optional `extras/testflight/launch-testflight.sh`)
+remain macOS-only.
 
 ## Run loops in the foreground
 

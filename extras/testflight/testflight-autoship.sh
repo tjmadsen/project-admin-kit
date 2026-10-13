@@ -5,12 +5,16 @@ set -uo pipefail
 
 [[ "$#" -ge 4 ]] || { echo "Usage: $0 <workItems> <docId> <agent> <worktree> [label] [upload-script] [bundle-id]" >&2; exit 2; }
 COLLECTION="$1"; DOC_ID="$2"; AGENT_TOKEN="$3"; BUILD_WORKTREE="$4"; LABEL="${5:-$DOC_ID}"
-UPLOAD_SCRIPT="${6:-scripts/upload-testflight.sh}"
+UPLOAD_SCRIPT="$(basename "${6:-upload-testflight.sh}")"
 BUNDLE_ID="${7:-${PROJECT_ADMIN_IOS_BUNDLE_ID:-}}"
 [[ -n "$BUNDLE_ID" ]] || { echo "Missing bundle id argument or PROJECT_ADMIN_IOS_BUNDLE_ID" >&2; exit 2; }
-REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-STATE_DIRECTORY="$(node "$REPO_ROOT/scripts/project-env.js" value STATE_DIRECTORY)"
-LOG_DIRECTORY_NAME="$(node "$REPO_ROOT/scripts/project-env.js" value LOG_DIRECTORY_NAME)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+KIT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+STATE_DIRECTORY="$(node "$KIT_ROOT/scripts/project-env.js" value STATE_DIRECTORY)"
+LOG_DIRECTORY_NAME="$(node "$KIT_ROOT/scripts/project-env.js" value LOG_DIRECTORY_NAME)"
+# Where the kit sits inside a product checkout (docs/LAYOUTS.md): "." when the
+# kit is the repository, "ops" when embedded, empty when it is a separate repo.
+KIT_SUBDIR="$(node "$KIT_ROOT/scripts/project-env.js" value KIT_SUBDIR 2>/dev/null || echo .)"
 BUILD_NUMBER="$(date +%y%m%d%H%M)"
 LOG_DIR="$HOME/Library/Logs/$LOG_DIRECTORY_NAME"
 mkdir -p "$LOG_DIR"
@@ -22,7 +26,7 @@ mkdir -p "$(dirname "$LOCK_DIR")"
 # launch recorded before the migration still resolves. The CLI reads the kind
 # from the document itself.
 case "$COLLECTION" in
-  workItems|featureRequests|bugs) CLI="$REPO_ROOT/scripts/work-agent.js" ;;
+  workItems|featureRequests|bugs) CLI="$KIT_ROOT/scripts/work-agent.js" ;;
   *) echo "Invalid collection $COLLECTION" >&2; exit 2 ;;
 esac
 
@@ -34,7 +38,9 @@ remove_launch_job() {
   fi
 }
 cleanup_worktree() {
-  if [[ -d "$BUILD_WORKTREE" ]]; then git -C "$REPO_ROOT" worktree remove --force "$BUILD_WORKTREE" >>"$LOG_FILE" 2>&1 || log "Could not remove $BUILD_WORKTREE"; fi
+  if [[ -d "$BUILD_WORKTREE" ]]; then # The release worktree lives in .agent-worktrees/ of a checkout of the same
+  # product repository, so its parent resolves the right worktree list.
+  git -C "$(dirname "$BUILD_WORKTREE")" worktree remove --force "$BUILD_WORKTREE" >>"$LOG_FILE" 2>&1 || log "Could not remove $BUILD_WORKTREE"; fi
 }
 hand_back() {
   log "HAND BACK: $1"
@@ -46,12 +52,16 @@ cleanup_upload_output() { if [[ -n "${UPLOAD_OUTPUT:-}" ]]; then rm -f "$UPLOAD_
 trap 'release_lock; remove_launch_job; cleanup_upload_output' EXIT
 
 case "$UPLOAD_SCRIPT" in
-  scripts/upload-testflight.sh|scripts/upload-admin-testflight.sh) ;;
+  upload-testflight.sh|upload-admin-testflight.sh) ;;
   *) hand_back "unsupported TestFlight upload script: $UPLOAD_SCRIPT" ;;
 esac
+# Run the merged copy from the release worktree when the kit lives inside the
+# product repository; a separate kit checkout runs its own copy against it.
+if [[ -n "$KIT_SUBDIR" ]]; then UPLOAD_PATH="$BUILD_WORKTREE/$KIT_SUBDIR/extras/testflight/$UPLOAD_SCRIPT"
+else UPLOAD_PATH="$SCRIPT_DIR/$UPLOAD_SCRIPT"; fi
 
 log "Starting TestFlight build $BUILD_NUMBER for $LABEL with $UPLOAD_SCRIPT"
-[[ -x "$BUILD_WORKTREE/$UPLOAD_SCRIPT" ]] || hand_back "release worktree is missing $UPLOAD_SCRIPT"
+[[ -x "$UPLOAD_PATH" ]] || hand_back "release worktree is missing $UPLOAD_PATH"
 
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
   if [[ -f "$LOCK_DIR/pid" ]] && ! kill -0 "$(cat "$LOCK_DIR/pid" 2>/dev/null)" 2>/dev/null; then rm -rf "$LOCK_DIR"; mkdir "$LOCK_DIR" || hand_back "could not acquire TestFlight lock";
@@ -60,7 +70,7 @@ fi
 echo "$$" > "$LOCK_DIR/pid"
 
 UPLOAD_OUTPUT="$(mktemp "${TMPDIR:-/tmp}/project-admin-testflight-upload.XXXXXX")"
-(cd "$BUILD_WORKTREE" && "./$UPLOAD_SCRIPT" "$BUILD_NUMBER") 2>&1 | tee -a "$LOG_FILE" >"$UPLOAD_OUTPUT"
+(cd "$BUILD_WORKTREE" && PROJECT_ADMIN_PRODUCT_ROOT="$BUILD_WORKTREE" "$UPLOAD_PATH" "$BUILD_NUMBER") 2>&1 | tee -a "$LOG_FILE" >"$UPLOAD_OUTPUT"
 UPLOAD_STATUS="${PIPESTATUS[0]}"
 upload_failure_detail() { grep -v '^[[:space:]]*$' "$UPLOAD_OUTPUT" | tail -1 | cut -c1-300; }
 [[ "$UPLOAD_STATUS" -eq 0 ]] || hand_back "archive or upload failed (exit $UPLOAD_STATUS): $(upload_failure_detail)"
@@ -73,7 +83,7 @@ grep -q "^PROJECT_ADMIN_TESTFLIGHT_BUILD=${BUILD_NUMBER}\$" "$UPLOAD_OUTPUT" \
 cleanup_upload_output
 release_lock
 log "Upload accepted; waiting for App Store Connect processing"
-PROJECT_ADMIN_IOS_BUNDLE_ID="$BUNDLE_ID" node "$REPO_ROOT/scripts/agent-loops/asc-poll-build.js" "$BUILD_NUMBER" 45 60 >>"$LOG_FILE" 2>&1
+PROJECT_ADMIN_IOS_BUNDLE_ID="$BUNDLE_ID" node "$SCRIPT_DIR/asc-poll-build.js" "$BUILD_NUMBER" 45 60 >>"$LOG_FILE" 2>&1
 POLL_STATUS=$?
 [[ "$POLL_STATUS" -eq 0 ]] || hand_back "build $BUILD_NUMBER did not reach VALID (poll exit $POLL_STATUS)"
 

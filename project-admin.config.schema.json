@@ -34,6 +34,13 @@
         "defaultBranch": { "type": "string", "minLength": 1 }
       }
     },
+    "layout": {
+      "description": "Where the kit sits relative to the product repository (docs/LAYOUTS.md). Absent means the kit is the product repository.",
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "productRoot": { "type": "string", "minLength": 1, "default": ".", "description": "Product checkout, relative to the kit directory or absolute: \".\" (the kit is the repository), \"..\" (embedded in a subdirectory), or another checkout (separate)." }
+      }
+    },
     "backend": {
       "description": "Backlog and telemetry store (docs/BACKENDS.md). Absent means firestore.",
       "oneOf": [

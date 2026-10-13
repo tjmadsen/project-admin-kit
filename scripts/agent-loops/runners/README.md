@@ -42,7 +42,7 @@ Environment passed to every adapter:
 | `PA_MODEL` | configured `model`, after the runner's env override (`CODEX_MODEL`, `CLAUDE_MODEL`) |
 | `PA_EFFORT` | item thinking effort, after the runner's env override (`CODEX_EFFORT`, `CLAUDE_EFFORT`, `GROK_EFFORT`); this is also what the run record shows |
 | `PA_PROMPT_FILE` | the rendered prompt (`{{AGENT}}` substituted) under `.agent-logs/`; removed after the run |
-| `PA_REPO_ROOT` | the loop checkout to work in |
+| `PA_REPO_ROOT` | the loop checkout of the product repository to work in (`PRODUCT_ROOT`, docs/LAYOUTS.md) |
 | `PA_SANDBOX` | Codex `--sandbox` mode (empty for other runners) |
 | `PA_HEADLESS_GUARD` | absolute path to `headless-guard.py` |
 | `PA_BG_WAIT_CEILING_MS` | Claude print-mode background-wait ceiling for this queue |

@@ -1,7 +1,7 @@
 # Project Admin feature loop — one lifecycle step
 
 You are the **{{AGENT}}** feature worker. The canonical, always-current workflow
-is `.claude/commands/feature-loop.md`; follow it exactly for one feature request
+is `{{KIT_ROOT}}/.claude/commands/feature-loop.md`; follow it exactly for one feature request
 from sync and claim through implementation, PR review, release handoff, or an
 explicit question gate.
 

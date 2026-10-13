@@ -8,8 +8,14 @@ argument-hint: "[sol|terra|luna|opus|sonnet|fable|grok]"
 Load the repository's project-specific names and targets before any command:
 
 ```bash
-eval "$(node scripts/project-env.js shell)"
+eval "$(node "${PROJECT_ADMIN_KIT_ROOT:-.}/scripts/project-env.js" shell)" && cd "$PRODUCT_ROOT"
 ```
+
+`$KIT_ROOT` holds the kit's CLIs and runbooks; `$PRODUCT_ROOT` is the repository
+you change, where branches, PRs, and `.agent-worktrees/` live. They are the same
+directory unless the kit is embedded in a subdirectory of the product or is a
+separate repository (`docs/LAYOUTS.md`). Loops export both (and
+`PROJECT_ADMIN_KIT_ROOT`); by hand, run the line above from the kit directory.
 
 You are the bug worker identified by `$ARGUMENTS`. Advance exactly one bug
 through investigation, approved repair, review, release, and acceptance. The
@@ -24,7 +30,7 @@ because a prose question cannot reach the project owner.
 ## 1. Sync and claim
 
 1. Read `AGENTS.md`, then run `git fetch origin "$DEFAULT_BRANCH"`.
-2. Claim with `node scripts/bug-agent.js next --as <agent>` and stop on
+2. Claim with `node "$KIT_ROOT/scripts/bug-agent.js" next --as <agent>` and stop on
    `{"none":true}`.
 3. Read the description, attachments, full thread, delivery fields, and
    `approvedGate`. Refer to the item as BUG-N.
@@ -47,12 +53,12 @@ does not merge or deploy.
 
 ## 3. Implement after plan approval
 
-Set up `.agent-worktrees/<agent>-bug-N` in two steps, and never repair in the
+Set up `$PRODUCT_ROOT/.agent-worktrees/<agent>-bug-N` in two steps, and never repair in the
 shared primary checkout:
 
-1. `git worktree add .agent-worktrees/<agent>-bug-N "origin/$DEFAULT_BRANCH" -b <agent>/bug-N`
+1. `git -C "$PRODUCT_ROOT" worktree add "$PRODUCT_ROOT/.agent-worktrees/<agent>-bug-N" "origin/$DEFAULT_BRANCH" -b <agent>/bug-N`
    for a fresh bug, or resume the recorded branch as described below.
-2. `scripts/agent-loops/provision-worktree.sh .agent-worktrees/<agent>-bug-N`
+2. `"$KIT_ROOT/scripts/agent-loops/provision-worktree.sh" "$PRODUCT_ROOT/.agent-worktrees/<agent>-bug-N"`
    — a fresh checkout has no `auth.env` and no `node_modules`, so the backlog CLI
    and every suite fail there until this runs. It is idempotent, so run it on
    resume too; `--dry-run` prints the plan without touching anything.
@@ -74,7 +80,7 @@ the conflict-resolution delta. When the file set and behavior are unchanged,
 push and preserve the project owner's existing release grant:
 
 ```bash
-node scripts/bug-agent.js set <id> --as <agent> \
+node "$KIT_ROOT/scripts/bug-agent.js" set <id> --as <agent> \
   --status ready_for_deploy --waiting deployer --gate none \
   -m "Mechanical merge repair complete for PR #N on <branch>; reviewed behavior and approved targets are unchanged; focused tests pass."
 ```
@@ -95,7 +101,7 @@ After PR approval, read `.claude/commands/deploy-loop.md` and record the exact
 release:
 
 ```bash
-node scripts/bug-agent.js deploy-pending <id> --as <agent> \
+node "$KIT_ROOT/scripts/bug-agent.js" deploy-pending <id> --as <agent> \
   --targets <comma-separated-targets> \
   --notes $'Scope: ...\nCommands: ...\nVerification: ...\nAcceptance: ...' \
   -m "ready for deployment approval"
@@ -103,12 +109,12 @@ node scripts/bug-agent.js deploy-pending <id> --as <agent> \
 
 If the fix needs no release (duplicate, already fixed by another item, or
 verified by the project owner outside the deploy loop), use
-`node scripts/bug-agent.js close-no-deploy <id> --as <agent> -m "..."`. It
+`node "$KIT_ROOT/scripts/bug-agent.js" close-no-deploy <id> --as <agent> -m "..."`. It
 closes the bug with the note in the thread and no deployment timestamps, and
 refuses while any release scope is planned, approved, queued, or in flight.
 
 Allowed targets are the enabled ids printed by
-`node scripts/lib/deploy-targets.js ids` (from `deployments.targets`; `none` is
+`node "$KIT_ROOT/scripts/lib/deploy-targets.js" ids` (from `deployments.targets`; `none` is
 always available), and each one's runbook says what its notes must cover.
 Select every required surface from the PR and root cause; never use `mixed`.
 Notes must itemize scope, exact command order, target-specific live proof, and

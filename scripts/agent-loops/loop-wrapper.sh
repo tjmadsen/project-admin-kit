@@ -16,6 +16,11 @@
 # the configured origin branch on every fire so the run always uses the committed runner,
 # prompts, and CLIs.
 #
+# The worktree belongs to the product repository (`layout.productRoot`,
+# docs/LAYOUTS.md). When the kit lives inside that repository (the default, or
+# embedded in a subdirectory) the worktree's own copy of the kit runs; a kit in
+# a separate repository runs from its own checkout against the worktree.
+#
 # NOT `set -e` beyond the argument checks: a failed iteration should be logged
 # and retried on the next fire, never abort the schedule.
 set -uo pipefail
@@ -50,18 +55,30 @@ if [[ -z "${PROJECT_ADMIN_LOOP_QOS_FIXED:-}" && "$(uname -s)" == "Darwin" ]] && 
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-if [[ -f "$REPO_ROOT/scripts/project-env.js" ]]; then
-  DEFAULT_BRANCH="$(node "$REPO_ROOT/scripts/project-env.js" value DEFAULT_BRANCH)"
-  STATE_DIRECTORY="$(node "$REPO_ROOT/scripts/project-env.js" value STATE_DIRECTORY)"
-  PROJECT_SLUG="$(node "$REPO_ROOT/scripts/project-env.js" value PROJECT_SLUG)"
+KIT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PROJECT_ENV="$KIT_ROOT/scripts/project-env.js"
+if [[ -f "$PROJECT_ENV" ]]; then
+  DEFAULT_BRANCH="$(node "$PROJECT_ENV" value DEFAULT_BRANCH)"
+  STATE_DIRECTORY="$(node "$PROJECT_ENV" value STATE_DIRECTORY)"
+  PROJECT_SLUG="$(node "$PROJECT_ENV" value PROJECT_SLUG)"
+  PRODUCT_ROOT="$(node "$PROJECT_ENV" value PRODUCT_ROOT)"
+  KIT_SUBDIR="$(node "$PROJECT_ENV" value KIT_SUBDIR)"
 else
   DEFAULT_BRANCH="master"
   STATE_DIRECTORY=".project-admin"
   PROJECT_SLUG=""
+  PRODUCT_ROOT="$KIT_ROOT"
+  KIT_SUBDIR="."
 fi
 STATE_DIR="${PROJECT_ADMIN_LOOP_STATE_DIR:-$HOME/$STATE_DIRECTORY}"
-WORKTREE="$REPO_ROOT/.agent-worktrees/loop-$QUEUE-$TOKEN"
+WORKTREE="$PRODUCT_ROOT/.agent-worktrees/loop-$QUEUE-$TOKEN"
+# The kit that runs this fire: the worktree's committed copy, or (separate
+# layout, empty KIT_SUBDIR) this kit checkout pointed at the worktree.
+case "$KIT_SUBDIR" in
+  .) LOOP_KIT="$WORKTREE" ;;
+  "") LOOP_KIT="$KIT_ROOT"; export PROJECT_ADMIN_PRODUCT_ROOT="$WORKTREE" ;;
+  *) LOOP_KIT="$WORKTREE/$KIT_SUBDIR" ;;
+esac
 # Prefixed by project slug: projects on one host often share ~/.project-admin.
 LOCK="$STATE_DIR/${PROJECT_SLUG:+$PROJECT_SLUG-}$QUEUE-loop-$TOKEN.lock"
 POLL_LOG="$STATE_DIR/logs/poll-${PROJECT_SLUG:+$PROJECT_SLUG-}$QUEUE-$TOKEN.log"
@@ -93,7 +110,8 @@ trap 'rmdir "$LOCK" 2>/dev/null' EXIT
 # so each fire runs the committed runner rather than whatever the last iteration
 # happened to leave behind.
 if [[ ! -d "$WORKTREE" ]]; then
-  git -C "$REPO_ROOT" worktree add --detach "$WORKTREE" "origin/$DEFAULT_BRANCH" >>"$POLL_LOG" 2>&1 \
+  mkdir -p "$(dirname "$WORKTREE")"
+  git -C "$PRODUCT_ROOT" worktree add --detach "$WORKTREE" "origin/$DEFAULT_BRANCH" >>"$POLL_LOG" 2>&1 \
     || { plog "FATAL: could not create the loop worktree $WORKTREE"; exit 3; }
   plog "created loop worktree $WORKTREE"
 fi
@@ -107,15 +125,20 @@ fi
 # a fresh worktree has none. Link them to the primary checkout's installs rather
 # than running an npm install on every fire. provision-worktree.sh does the
 # richer version of this for build worktrees; a scheduled loop deliberately
-# stays npm-free so a lockfile drift cannot stall the schedule.
-for rel in scripts/node_modules admin-app/node_modules; do
-  if [[ -d "$REPO_ROOT/$rel" && ! -e "$WORKTREE/$rel" ]]; then
-    mkdir -p "$(dirname "$WORKTREE/$rel")" && ln -sfn "$REPO_ROOT/$rel" "$WORKTREE/$rel"
-  fi
-done
+# stays npm-free so a lockfile drift cannot stall the schedule. A separate kit
+# runs from this checkout and already has them.
+if [[ "$LOOP_KIT" != "$KIT_ROOT" ]]; then
+  for rel in scripts/node_modules admin-app/node_modules; do
+    if [[ -d "$KIT_ROOT/$rel" && ! -e "$LOOP_KIT/$rel" ]]; then
+      mkdir -p "$(dirname "$LOOP_KIT/$rel")" && ln -sfn "$KIT_ROOT/$rel" "$LOOP_KIT/$rel"
+    fi
+  done
+fi
 
+[[ -x "$LOOP_KIT/scripts/agent-loops/run-loop.sh" ]] \
+  || { plog "FATAL: $LOOP_KIT/scripts/agent-loops/run-loop.sh is missing (is the kit committed on origin/$DEFAULT_BRANCH?)"; exit 3; }
 plog "running run-loop.sh $TOKEN $QUEUE --once (HEAD $(git -C "$WORKTREE" rev-parse --short HEAD 2>/dev/null || echo unknown))"
-"$WORKTREE/scripts/agent-loops/run-loop.sh" "$TOKEN" "$QUEUE" --once
+"$LOOP_KIT/scripts/agent-loops/run-loop.sh" "$TOKEN" "$QUEUE" --once
 rc=$?
 plog "run-loop.sh $TOKEN $QUEUE finished (exit $rc)"
 exit "$rc"

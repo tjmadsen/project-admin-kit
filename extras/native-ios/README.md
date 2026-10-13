@@ -19,19 +19,21 @@ console. The accepted routes and prefixes come from `workItemRoutes` in
 - Minimum iOS: 17.0
 - Firebase project: the project configured in `GoogleService-Info.plist`
 - Apple team: set `DEVELOPMENT_TEAM` in `project.yml`
-- TestFlight upload: `scripts/upload-admin-testflight.sh`
+- TestFlight upload: `extras/testflight/upload-admin-testflight.sh`
+- Backend: firestore only (it signs in to Firebase Auth and reads `adminUsers`;
+  see `docs/BACKENDS.md`)
 
 ## Build locally
 
 Generate the Xcode project from `project.yml` with XcodeGen:
 
 ```sh
-xcodegen generate --spec native-ios/project.yml --project native-ios --project-root native-ios
-xcodebuild -project native-ios/ProjectAdmin.xcodeproj -scheme ProjectAdmin \
+xcodegen generate --spec extras/native-ios/project.yml --project extras/native-ios --project-root extras/native-ios
+xcodebuild -project extras/native-ios/ProjectAdmin.xcodeproj -scheme ProjectAdmin \
   -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
 ```
 
-Download the Firebase iOS app's `GoogleService-Info.plist` into `native-ios/`.
+Download the Firebase iOS app's `GoogleService-Info.plist` into `extras/native-ios/`.
 Push delivery additionally requires the Push Notifications capability for the
 chosen bundle ID and a valid APNs authentication key in Firebase Cloud Messaging.
 Email remains the fallback when permission is denied or push is unavailable.
@@ -49,7 +51,7 @@ The first release needs an App Store Connect app for the chosen bundle ID:
 After that one-time registration, the approved deploy loop can run:
 
 ```sh
-./scripts/upload-admin-testflight.sh <unique-numeric-build-number>
+./extras/testflight/upload-admin-testflight.sh <unique-numeric-build-number>
 ```
 
 Lifecycle push delivery is released with the affected Firestore rules and Cloud

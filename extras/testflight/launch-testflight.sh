@@ -6,22 +6,26 @@ set -euo pipefail
 
 [[ "$#" -ge 4 ]] || { echo "Usage: $0 <workItems> <docId> <agent> <worktree> [label] [upload-script] [bundle-id]" >&2; exit 2; }
 COLLECTION="$1"; DOC_ID="$2"; AGENT_TOKEN="$3"; ITEM_LABEL="${5:-$DOC_ID}"
-UPLOAD_SCRIPT="${6:-scripts/upload-testflight.sh}"
+# The upload script is named by file (upload-testflight.sh or
+# upload-admin-testflight.sh); a path such as scripts/upload-testflight.sh from
+# an item approved before extras/ existed resolves to the same file.
+UPLOAD_SCRIPT="$(basename "${6:-upload-testflight.sh}")"
 BUNDLE_ID="${7:-${PROJECT_ADMIN_IOS_BUNDLE_ID:-}}"
 [[ -n "$BUNDLE_ID" ]] || { echo "Missing bundle id argument or PROJECT_ADMIN_IOS_BUNDLE_ID" >&2; exit 2; }
 BUILD_WORKTREE="$(cd "$4" && pwd)" || { echo "Release worktree does not exist: $4" >&2; exit 2; }
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+KIT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 NODE_BIN="$(command -v node)"
 RUNTIME_PATH="$(dirname "$NODE_BIN"):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-if [[ "$UPLOAD_SCRIPT" == 'scripts/upload-testflight.sh' ]]; then
+if [[ "$UPLOAD_SCRIPT" == 'upload-testflight.sh' ]]; then
   FLUTTER_BIN="$(command -v flutter)"
   RUNTIME_PATH="$(dirname "$FLUTTER_BIN"):$RUNTIME_PATH"
 fi
 JOB_SUFFIX="$(date +%y%m%d%H%M%S)"
 JOB_LABEL="com.projectadmin.testflight.${JOB_SUFFIX}"
 LOG_DIR="$HOME/Library/Logs/ProjectAdminAgentLoops"
-if [[ -f "$SCRIPT_DIR/../project-env.js" ]]; then
-  LOG_DIR="$HOME/Library/Logs/$(node "$SCRIPT_DIR/../project-env.js" value LOG_DIRECTORY_NAME)"
+if [[ -f "$KIT_ROOT/scripts/project-env.js" ]]; then
+  LOG_DIR="$HOME/Library/Logs/$(node "$KIT_ROOT/scripts/project-env.js" value LOG_DIRECTORY_NAME)"
 fi
 LAUNCH_LOG="$LOG_DIR/testflight-${DOC_ID}-launcher-${JOB_SUFFIX}.log"
 PLIST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/project-admin-testflight-launch.XXXXXX")"
@@ -33,7 +37,7 @@ trap 'rm -rf "$PLIST_DIR"' EXIT
 # launch recorded before the migration still resolves. The CLI reads the kind
 # from the document itself.
 case "$COLLECTION" in
-  workItems|featureRequests|bugs) CLI="$SCRIPT_DIR/../work-agent.js" ;;
+  workItems|featureRequests|bugs) CLI="$KIT_ROOT/scripts/work-agent.js" ;;
   *) echo "Invalid collection $COLLECTION" >&2; exit 2 ;;
 esac
 

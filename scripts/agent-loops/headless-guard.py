@@ -9,7 +9,7 @@ agent might run by accident, and allows everything else through untouched.
 Scope is deliberately narrow — DESTRUCTION and PRIVILEGE/RCE only, NOT ships or
 secrets. Deliberately NOT blocked, because the deploy loop needs every one of
 them: `./build_and_deploy.sh`, `firebase deploy --only ...`, Vercel deploys,
-`gcloud run deploy`, `scripts/upload-testflight.sh` and the TestFlight autoship
+`gcloud run deploy`, `extras/testflight/upload-testflight.sh` and the TestFlight autoship
 poller, ordinary `git push` (including build-number bumps), and reading the App
 Store Connect `.p8` key.
 

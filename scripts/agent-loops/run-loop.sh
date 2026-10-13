@@ -7,15 +7,21 @@ AGENT_TOKEN="$REQUESTED_AGENT"
 QUEUE_NAME="${2:-}"
 RUN_MODE="${3:---once}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-STATE_DIRECTORY="$(node "$REPO_ROOT/scripts/project-env.js" value STATE_DIRECTORY)"
+# KIT_ROOT holds the kit's scripts and runbooks; the agent works in PRODUCT_ROOT,
+# the product checkout (the same directory unless the kit is embedded in a
+# subdirectory or is a separate repository; docs/LAYOUTS.md).
+# Physical paths (-P), matching the real paths project-env.js reports.
+KIT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
+PRODUCT_ROOT="$(node "$KIT_ROOT/scripts/project-env.js" value PRODUCT_ROOT)"
+PRODUCT_ROOT="${PRODUCT_ROOT:-$KIT_ROOT}"
+STATE_DIRECTORY="$(node "$KIT_ROOT/scripts/project-env.js" value STATE_DIRECTORY)"
 # PROJECT_ADMIN_MACHINE_ID (set by every scheduler) wins; otherwise the roster
 # entry whose `hostnames` names this host, then automation.defaultMachineId.
-MACHINE_ID="${PROJECT_ADMIN_MACHINE_ID:-$(node "$REPO_ROOT/scripts/project-env.js" value MACHINE_ID)}"
+MACHINE_ID="${PROJECT_ADMIN_MACHINE_ID:-$(node "$KIT_ROOT/scripts/project-env.js" value MACHINE_ID)}"
 INTERVAL_SECONDS="${PROJECT_ADMIN_LOOP_INTERVAL_SECONDS:-1800}"
 PROGRESS_INTERVAL_SECONDS="${PROJECT_ADMIN_LOOP_PROGRESS_SECONDS:-900}"
-AGENTS_HELPER="$REPO_ROOT/scripts/lib/agents.js"
-WORK_KINDS_HELPER="$REPO_ROOT/scripts/lib/work-kinds.js"
+AGENTS_HELPER="$KIT_ROOT/scripts/lib/agents.js"
+WORK_KINDS_HELPER="$KIT_ROOT/scripts/lib/work-kinds.js"
 AUTH_ALERT_STAMP="${PROJECT_ADMIN_LOOP_AUTH_STAMP:-$HOME/$STATE_DIRECTORY/loop-auth-alert.stamp}"
 AUTH_ALERT_DEBOUNCE_SECONDS="${PROJECT_ADMIN_LOOP_AUTH_DEBOUNCE_SECONDS:-1800}"
 # Alerts go through notify.js (desktop and/or webhook per `notifications`).
@@ -112,9 +118,9 @@ fi
 count_queue() {
   if [[ "$QUEUE_NAME" == "deploy" ]]; then
     # Without --kind, deploy-count covers every kind whose items deploy.
-    node "$REPO_ROOT/scripts/work-agent.js" deploy-count --as "$AGENT_TOKEN"
+    node "$KIT_ROOT/scripts/work-agent.js" deploy-count --as "$AGENT_TOKEN"
   else
-    node "$REPO_ROOT/scripts/work-agent.js" --kind "$QUEUE_NAME" count --as "$AGENT_TOKEN"
+    node "$KIT_ROOT/scripts/work-agent.js" --kind "$QUEUE_NAME" count --as "$AGENT_TOKEN"
   fi
 }
 
@@ -139,7 +145,7 @@ notify_auth_failure() {
 }
 
 run_once() {
-  cd "$REPO_ROOT"
+  cd "$PRODUCT_ROOT"
   # A run killed by a signal (launchctl bootout during provision-machine.sh
   # install, a machine restart, a hard kill) never reaches finish/release-claim
   # below, so its row stays "running" with a frozen heartbeat and its item stays
@@ -175,11 +181,14 @@ run_once() {
   loop_run_id="$(node "$SCRIPT_DIR/log-run.js" start --agent "$AGENT_TOKEN" --queue "$QUEUE_NAME" --machine "$MACHINE_ID" --pid $$ --effort "$run_effort")"
   export PROJECT_ADMIN_AGENT_RUN_ID="$loop_run_id"
   export PROJECT_ADMIN_MACHINE_ID="$MACHINE_ID"
-  log_dir="$REPO_ROOT/.agent-logs"
+  # The runbooks' first step, `eval "$(node "$PROJECT_ADMIN_KIT_ROOT/scripts/project-env.js" shell)"`,
+  # turns these into $KIT_ROOT and $PRODUCT_ROOT for the agent.
+  export PROJECT_ADMIN_KIT_ROOT="$KIT_ROOT" PROJECT_ADMIN_PRODUCT_ROOT="$PRODUCT_ROOT"
+  log_dir="$KIT_ROOT/.agent-logs"
   mkdir -p "$log_dir"
   log_file="$log_dir/${QUEUE_NAME}-${AGENT_TOKEN}-${loop_run_id}.log"
   prompt_file="$log_dir/${QUEUE_NAME}-${AGENT_TOKEN}-${loop_run_id}.prompt.md"
-  sed "s/{{AGENT}}/$AGENT_TOKEN/g" "$prompt_template" > "$prompt_file"
+  sed -e "s/{{AGENT}}/$AGENT_TOKEN/g" -e "s|{{KIT_ROOT}}|$KIT_ROOT|g" "$prompt_template" > "$prompt_file"
 
   # The adapter contract (runners/README.md): PA_* environment in, the CLI's
   # stdout/stderr out, its exit code back. The outer timeout stays here so every
@@ -187,7 +196,7 @@ run_once() {
   local -a command_line=("$TIMEOUT_BIN" --signal=TERM --kill-after=30s "$LOOP_TIMEOUT_SECONDS" env
     "PA_AGENT=$AGENT_TOKEN" "PA_QUEUE=$QUEUE_NAME" "PA_RUNNER=$PA_RUNNER"
     "PA_MODEL=$run_model" "PA_EFFORT=$run_effort" "PA_PROMPT_FILE=$prompt_file"
-    "PA_REPO_ROOT=$REPO_ROOT" "PA_SANDBOX=$PA_SANDBOX" "PA_HEADLESS_GUARD=$SCRIPT_DIR/headless-guard.py"
+    "PA_REPO_ROOT=$PRODUCT_ROOT" "PA_SANDBOX=$PA_SANDBOX" "PA_HEADLESS_GUARD=$SCRIPT_DIR/headless-guard.py"
     "PA_BG_WAIT_CEILING_MS=$CLAUDE_BACKGROUND_WAIT_CEILING_MS" "PA_TIMEOUT_SECONDS=$LOOP_TIMEOUT_SECONDS"
     "PA_COMMAND_JSON=$PA_COMMAND_JSON" "PA_PROMPT_VIA=$PA_PROMPT_VIA"
     "$RUNNER_ADAPTER")

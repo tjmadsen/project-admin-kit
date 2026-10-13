@@ -23,6 +23,7 @@ const ROSTER_FILES = [
   'scripts/lib/agent-roster.js',
   'scripts/lib/agent-defaults.json',
   'scripts/lib/project-config.js',
+  'scripts/lib/layout.js',
   'scripts/lib/work-kinds.js',
   'scripts/lib/work-kinds.defaults.json',
   'scripts/lib/deploy-targets.js',
@@ -71,6 +72,8 @@ if [[ "\${1:-}" == "-e" ]]; then exec ${REAL_NODE} "$@"; fi
 name="$(basename "\${1:-}")"
 case "$name" in
   classify-run-result.js|agents.js|work-kinds.js) exec ${REAL_NODE} "$@" ;;
+  # Only sandboxes that copy project-env.js (the layout tests) resolve real values.
+  project-env.js) if [[ -f "$1" ]]; then exec ${REAL_NODE} "$@"; fi ;;
   notify.js) shift; echo "NOTIFY_JS: $*" >> ${record} ;;
   log-run.js)
     echo "LOG_RUN_ARGV: $*" >> ${record}
@@ -326,6 +329,28 @@ test('the command runner propagates the CLI exit code and the usage hook is per 
   assert.match(record, /USAGE_HOOK: gemini/);
 });
 
+test('with a separate product repository the agent works there and finds the kit through the environment', () => {
+  const sandbox = makeSandbox();
+  write(path.join(sandbox.root, 'scripts/project-env.js'), fs.readFileSync(path.join(REPO, 'scripts/project-env.js')));
+  const product = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'project-admin-product-')));
+  execFileSync('git', ['init', '-q', product]);
+  const automation = { ...JSON.parse(fs.readFileSync(path.join(REPO, 'project-admin.config.json'), 'utf8')).automation, defaultWorkAgent: 'gem', defaultDeployAgent: 'gem' };
+  const config = writeConfig(sandbox.root, [{ token: 'gem', label: 'Gemini', runner: 'command', model: 'gemini-pro', command: ['fake-cli', '{{repo}}', '{{prompt}}'] }], { automation, layout: { productRoot: product } });
+  write(path.join(sandbox.root, 'scripts/agent-loops/feature-loop-prompt.md'), 'Follow {{KIT_ROOT}}/.claude/commands/feature-loop.md as {{AGENT}}\n');
+  write(path.join(sandbox.bin, 'fake-cli'), `#!/usr/bin/env bash
+{ echo "FAKE_PWD: $PWD"; echo "FAKE_ARGS: $*"; echo "FAKE_KIT: $PROJECT_ADMIN_KIT_ROOT"; echo "FAKE_PRODUCT: $PROJECT_ADMIN_PRODUCT_ROOT"; } >> ${sandbox.record}
+`, 0o755);
+  const { status, stderr, record } = runLoop(sandbox, 'gem', 'feature', { PROJECT_ADMIN_CONFIG: config, PROJECT_ADMIN_MACHINE_ID: 'local-mac' });
+  assert.equal(status, 0, stderr);
+  const kit = fs.realpathSync(sandbox.root);
+  assert.equal(fs.realpathSync(record.match(/^FAKE_PWD: (.*)$/m)[1]), product, 'the agent starts in the product checkout');
+  assert.match(record, new RegExp(`^FAKE_ARGS: ${product} Follow ${kit}/\\.claude/commands/feature-loop\\.md as gem$`, 'm'), 'PA_REPO_ROOT is the product and the prompt names the kit runbook');
+  assert.equal(fs.realpathSync(record.match(/^FAKE_KIT: (.*)$/m)[1]), kit);
+  assert.equal(record.match(/^FAKE_PRODUCT: (.*)$/m)[1], product);
+  assert.ok(fs.readdirSync(path.join(sandbox.root, '.agent-logs')).length > 0, 'run transcripts stay in the kit, not the product checkout');
+  assert.ok(!fs.existsSync(path.join(product, '.agent-logs')));
+});
+
 // --- loop-wrapper.sh -------------------------------------------------------
 
 function makeWrapperSandbox() {
@@ -434,6 +459,62 @@ test('with project config present the wrapper lock is namespaced by project slug
   assert.equal(free.status, 0, free.stderr);
   assert.ok(fs.existsSync(path.join(sandbox.root, 'state/logs/poll-rocket-feature-opus.log')));
   assert.match(free.record, /RUN_LOOP: agent=opus queue=feature/, "another project's lock does not block this project");
+});
+
+// docs/LAYOUTS.md: the kit embedded in, or separate from, the product repository.
+// `kitDir` is where the kit lives; worktrees always come from `product`.
+function makeLayoutSandbox(mode) {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `project-admin-${mode}-`)));
+  const origin = path.join(root, 'origin.git');
+  const product = path.join(root, 'product');
+  const kitDir = mode === 'embedded' ? path.join(product, 'ops') : path.join(root, 'product-admin');
+  const record = path.join(root, 'record.txt');
+  const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' });
+  execFileSync('git', ['init', '--bare', '-b', 'master', origin], { encoding: 'utf8' });
+  execFileSync('git', ['init', '-b', 'master', product], { encoding: 'utf8' });
+  git(product, 'config', 'user.email', 'loop@example.com');
+  git(product, 'config', 'user.name', 'Loop Test');
+  write(path.join(product, '.gitignore'), '.agent-worktrees/\nnode_modules\n');
+  write(path.join(product, 'app.txt'), 'the product\n');
+  copyRosterFiles(kitDir);
+  write(path.join(kitDir, 'scripts/project-env.js'), fs.readFileSync(path.join(REPO, 'scripts/project-env.js')));
+  const config = JSON.parse(fs.readFileSync(path.join(REPO, 'project-admin.config.json'), 'utf8'));
+  write(path.join(kitDir, 'project-admin.config.json'), JSON.stringify({
+    ...config,
+    repository: { ...config.repository, defaultBranch: 'master' },
+    layout: { productRoot: mode === 'embedded' ? '..' : '../product' },
+  }));
+  write(path.join(kitDir, 'scripts/agent-loops/loop-wrapper.sh'), fs.readFileSync(path.join(AGENT_LOOPS, 'loop-wrapper.sh')), 0o755);
+  write(path.join(kitDir, 'scripts/agent-loops/run-loop.sh'), `#!/usr/bin/env bash
+echo "RUN_LOOP: agent=$1 queue=$2 self=$0 product=\${PROJECT_ADMIN_PRODUCT_ROOT:-unset}" >> ${record}
+`, 0o755);
+  fs.mkdirSync(path.join(kitDir, 'scripts/node_modules'), { recursive: true });
+  git(product, 'add', '-A');
+  git(product, 'commit', '-qm', 'initial');
+  git(product, 'remote', 'add', 'origin', origin);
+  git(product, 'push', '-q', 'origin', 'master');
+  return { root, repo: kitDir, kitDir, product, record };
+}
+
+test('embedded: loop worktrees come from the product repository and run the kit copy inside them', () => {
+  const sandbox = makeLayoutSandbox('embedded');
+  const { status, stderr, record } = runWrapper(sandbox, 'opus', 'bug', { PROJECT_ADMIN_CONFIG: '' });
+  assert.equal(status, 0, stderr);
+  const worktree = path.join(sandbox.product, '.agent-worktrees/loop-bug-opus');
+  assert.ok(fs.existsSync(path.join(worktree, 'app.txt')), 'the worktree is a checkout of the product repository');
+  assert.ok(!fs.existsSync(path.join(sandbox.kitDir, '.agent-worktrees')), 'nothing is created inside the kit directory');
+  assert.match(record, new RegExp(`RUN_LOOP: agent=opus queue=bug self=${worktree}/ops/scripts/agent-loops/run-loop\\.sh product=unset`));
+  assert.ok(fs.existsSync(path.join(worktree, 'ops/scripts/node_modules')), 'kit dependencies are linked into the kit copy');
+});
+
+test('separate: loop worktrees come from the product repository and the kit checkout runs against them', () => {
+  const sandbox = makeLayoutSandbox('separate');
+  const { status, stderr, record } = runWrapper(sandbox, 'opus', 'feature', { PROJECT_ADMIN_CONFIG: '' });
+  assert.equal(status, 0, stderr);
+  const worktree = path.join(sandbox.product, '.agent-worktrees/loop-feature-opus');
+  assert.ok(fs.existsSync(path.join(worktree, 'app.txt')));
+  assert.match(record, new RegExp(`RUN_LOOP: agent=opus queue=feature self=${sandbox.kitDir}/scripts/agent-loops/run-loop\\.sh product=${worktree}$`, 'm'));
+  assert.ok(!fs.existsSync(path.join(worktree, 'scripts')), 'the product worktree gets no kit files');
 });
 
 test('the wrapper rejects an unknown token or queue', () => {

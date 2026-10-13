@@ -3,7 +3,9 @@
 Deploy-target runbook read by the deploy loop (`.claude/commands/deploy-loop.md`)
 for every approved release that names this target. `$DEPLOY_WT`, `$ITEM_REF`,
 `$ITEM_ID`, `$AGENT`, `$ITEM_CLI`, and `$MERGED_SHA` come from that runbook's
-merge step; project values come from `scripts/project-env.js shell`.
+merge step, as is `$DEPLOY_KIT` (the kit at the merged commit; the same
+directory as `$DEPLOY_WT` unless the kit is embedded or separate,
+`docs/LAYOUTS.md`); project values come from `$KIT_ROOT/scripts/project-env.js shell`.
 
 **Preconditions:** The configured Vercel production URL is
 `$VERCEL_PRODUCTION_URL`. Merging to `$DEFAULT_BRANCH` triggers the GitHub/Vercel

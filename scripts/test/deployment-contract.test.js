@@ -84,7 +84,8 @@ test('a changed PR identity clears stale deployment approval while the same PR p
 test('deploy playbook reconciles PR context and records each target before closure', () => {
   const prompt = fs.readFileSync(path.join(__dirname, '..', '..', '.claude', 'commands', 'deploy-loop.md'), 'utf8');
   const backlog = fs.readFileSync(path.join(__dirname, '..', 'lib', 'backlog-agent.js'), 'utf8');
-  const testflightLauncher = fs.readFileSync(path.join(__dirname, '..', 'agent-loops', 'launch-testflight.sh'), 'utf8');
+  // The TestFlight extra is optional (extras/README.md); check it when installed.
+  const launcherPath = path.join(__dirname, '..', '..', 'extras', 'testflight', 'launch-testflight.sh');
   assert.match(prompt, /Inspect the PR file list and diff/i);
   assert.match(prompt, /deploy-check/);
   assert.match(prompt, /Command success alone is not proof/i);
@@ -92,7 +93,7 @@ test('deploy playbook reconciles PR context and records each target before closu
   assert.match(backlog, /missingDeploymentEvidence\(data, targets\)/);
   assert.match(backlog, /targetsRequiringHumanAcceptance\(targets\)/);
   assert.match(backlog, /items require \$\{OWNER_NAME\} hands-on acceptance and cannot be closed by the deploy loop/);
-  assert.match(testflightLauncher, /deployment-started/);
+  if (fs.existsSync(launcherPath)) assert.match(fs.readFileSync(launcherPath, 'utf8'), /deployment-started/);
 });
 
 test('allows closing without deployment only when no release scope is planned, approved, or in flight', () => {
