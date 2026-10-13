@@ -1,4 +1,4 @@
-node_modules/
+node_modules
 .firebase/
 .agent-logs/
 .agent-worktrees/

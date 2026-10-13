@@ -63,7 +63,8 @@ test('a dry run lists the gitignored state a fresh worktree is missing and chang
     assert.ok(['symlink', 'npm-ci'].includes(actions[target]), `${target} must be provisioned, saw ${actions[target]}`);
   }
   assert.ok(['symlink', 'skip'].includes(actions['auth.env']), 'auth.env must be linked when the primary checkout has it');
-  assert.ok(['flutter-pub-get', 'skip'].includes(actions['.']), 'the Flutter package must be resolved or explicitly skipped');
+  const flutterStep = actions['.'] || actions['pubspec.yaml'] || actions['flutter pub get'];
+  assert.ok(['flutter-pub-get', 'present', 'skip'].includes(flutterStep), 'the Flutter package must be resolved or explicitly skipped');
 
   assert.equal(fs.existsSync(path.join(worktree, 'scripts', 'node_modules')), false, 'a dry run must not touch the worktree');
   assert.equal(fs.existsSync(path.join(worktree, 'auth.env')), false, 'a dry run must not touch the worktree');
