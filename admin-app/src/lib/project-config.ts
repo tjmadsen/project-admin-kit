@@ -46,6 +46,8 @@ export interface ProjectAdminConfig {
     firebaseProjectId: string
     firestoreLocation: string
   }
+  /** Backlog store (docs/BACKENDS.md); absent means firestore. */
+  backend?: { type: 'firestore' | 'local' | 'github'; path?: string; repository?: string; labelPrefix?: string }
   firebase: {
     apiKey: string
     authDomain: string

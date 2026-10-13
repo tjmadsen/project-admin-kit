@@ -1,9 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
-import { onAuthStateChanged, type User } from 'firebase/auth'
-import { auth } from './lib/firebase'
-import { subscribeToAccessRole, type AccessRole } from './lib/auth'
-import { signOutAdmin } from './lib/native-bridge'
+import { onAuthChanged, signOut, subscribeAccessRole, type SessionUser } from './data'
+import type { AccessRole } from './lib/auth'
 import Login from './pages/Login'
 import Layout from './components/Layout'
 import Dashboard from './pages/Dashboard'
@@ -17,11 +15,11 @@ import { projectConfig } from './lib/project-config'
 import { WORK_KINDS, workKindPath } from './lib/work-kinds'
 
 export default function App() {
-  const [user, setUser] = useState<User | null | undefined>(undefined)
+  const [user, setUser] = useState<SessionUser | null | undefined>(undefined)
   const [role, setRole] = useState<AccessRole | null | undefined>(undefined)
   const [accessError, setAccessError] = useState('')
 
-  useEffect(() => onAuthStateChanged(auth, (nextUser) => {
+  useEffect(() => onAuthChanged((nextUser) => {
     setUser(nextUser)
   }), [])
 
@@ -32,7 +30,7 @@ export default function App() {
       if (user === null) setRole(null)
       return
     }
-    return subscribeToAccessRole(user, (nextRole, error) => {
+    return subscribeAccessRole(user, (nextRole, error) => {
       setRole(nextRole)
       setAccessError(error?.message || '')
     })
@@ -49,7 +47,7 @@ export default function App() {
           <h1>This console is private.</h1>
           <p><strong>{user.email}</strong> is signed in, but is not an active {projectConfig.project.name} collaborator.</p>
           {accessError && <p className="form-error">{accessError}</p>}
-          <button className="button secondary wide" onClick={() => void signOutAdmin(auth)}>Sign out</button>
+          <button className="button secondary wide" onClick={() => void signOut()}>Sign out</button>
         </div>
       </div>
     )

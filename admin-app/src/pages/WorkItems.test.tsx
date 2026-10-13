@@ -624,6 +624,8 @@ describe('WorkItems collaborator access', () => {
     fireEvent.click(holdActions[actionIndex])
 
     await waitFor(() => screen.getAllByRole('button', { name: '⏸ Hold' }).forEach((button) => expect(button).toBeDisabled()))
+    // The data layer loads its adapter before the write reaches Firestore.
+    await waitFor(() => expect(firestore.updateDoc).toHaveBeenCalledTimes(1))
     finishWrite()
     await waitFor(() => screen.getAllByRole('button', { name: '⏸ Hold' }).forEach((button) => expect(button).toBeEnabled()))
   })

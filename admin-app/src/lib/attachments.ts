@@ -1,5 +1,5 @@
-import { deleteObject, getDownloadURL, ref as storageRef, uploadBytes, type StorageReference } from 'firebase/storage'
-import { auth, storage } from './firebase'
+import { uploadAttachments } from '../data'
+import type { UploadedAttachments as DataUploadedAttachments } from '../data/types'
 import type { WorkKind } from './types'
 
 export const MAX_IMAGE_MB = 25
@@ -22,7 +22,7 @@ export function isSupportedAttachment(file: Pick<File, 'name' | 'type'>) {
   return file.type.startsWith('image/') || documentKind(file.name) != null
 }
 
-function attachmentContentType(file: File) {
+export function attachmentContentType(file: File) {
   const kind = documentKind(file.name)
   if (kind === 'pdf') return 'application/pdf'
   if (kind === 'csv') return 'text/csv'
@@ -60,39 +60,17 @@ export function mergeImageFiles(existing: File[], incoming: File[]) {
   return mergeAttachmentFiles(existing, incoming)
 }
 
-function safeFileName(name: string) {
+export function safeAttachmentName(name: string) {
   return (name || 'pasted-image.png').replace(/[^a-zA-Z0-9._-]/g, '_').slice(-80)
 }
 
-export interface UploadedImages {
-  urls: string[]
-  cleanup: () => Promise<void>
-}
-
+export type UploadedImages = DataUploadedAttachments
 export type UploadedAttachments = UploadedImages
 
+// Storage depends on the backend: Firebase Storage for firestore builds, files
+// beside the local store for local builds (see data/).
 export async function uploadWorkAttachments(files: File[], kind: WorkKind, itemId: string, uploaderEmail: string): Promise<UploadedAttachments> {
-  if (files.length === 0) return { urls: [], cleanup: async () => undefined }
-  const uid = auth.currentUser?.uid
-  if (!uid) throw new Error('Your Google session expired. Sign in again before uploading attachments.')
-  const uploaded: StorageReference[] = []
-  try {
-    for (const [index, file] of files.entries()) {
-      const unique = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${index}`
-      const path = `work-item-attachments/${uid}/${kind}/${itemId}/${unique}-${safeFileName(file.name)}`
-      const target = storageRef(storage, path)
-      await uploadBytes(target, file, {
-        contentType: attachmentContentType(file),
-        customMetadata: { uploaderEmail: uploaderEmail.toLowerCase(), kind, itemId },
-      })
-      uploaded.push(target)
-    }
-    const urls = await Promise.all(uploaded.map((target) => getDownloadURL(target)))
-    return { urls, cleanup: async () => { await Promise.allSettled(uploaded.map((target) => deleteObject(target))) } }
-  } catch (error) {
-    await Promise.allSettled(uploaded.map((target) => deleteObject(target)))
-    throw error
-  }
+  return uploadAttachments(files, kind, itemId, uploaderEmail)
 }
 
 export async function uploadWorkImages(files: File[], kind: WorkKind, itemId: string, uploaderEmail: string): Promise<UploadedImages> {

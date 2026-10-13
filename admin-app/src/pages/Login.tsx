@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { signInWithGoogle } from '../lib/firebase'
+import { signIn } from '../data'
 import ProjectMark from '../components/ProjectMark'
 import { projectConfig } from '../lib/project-config'
 
@@ -11,7 +11,7 @@ export default function Login() {
     setBusy(true)
     setError('')
     try {
-      await signInWithGoogle()
+      await signIn()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Google sign-in failed.')
       setBusy(false)
