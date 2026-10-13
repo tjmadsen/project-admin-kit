@@ -1,0 +1,39 @@
+name: Feature request
+description: Propose a new capability, runner, backend, deploy target, or workflow change.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: The change you would like. Say whether it could be configuration (a work kind, a command-runner agent, a deploy-target runbook) rather than code; docs/EXTENDING.md lists the extension points.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: gates
+    attributes:
+      label: Does it change a human gate or what an agent may do unattended?
+      description: Changes to approvals, deploy scope, or agent permissions need a security discussion (SECURITY.md).
+      options:
+        - "No"
+        - "Yes"
+        - Not sure
+    validations:
+      required: true
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I am willing to open a pull request for this.

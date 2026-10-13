@@ -1,0 +1,69 @@
+name: Bug report
+description: Something in the kit does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not report security vulnerabilities here; use the Security tab's private reporting (see SECURITY.md).
+        Remove credentials, real project ids, email addresses, and private paths from anything you paste.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Commands, config excerpts, or a work-item flow that shows the problem. `npm run demo` is a good shared starting point.
+      placeholder: |
+        1. npm run demo
+        2. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - Admin console
+        - Backlog CLI (work-agent.js)
+        - Agent loops / runners
+        - Scheduler (launchd, systemd, cron, foreground)
+        - Deploy loop / deploy targets
+        - Configuration / configure.js
+        - Install, upgrade, or layout
+        - Security rules
+        - Extras (Functions, iOS shell, TestFlight)
+        - Documentation
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Backend
+      options:
+        - firestore
+        - local
+        - github
+        - not applicable
+  - type: input
+    id: runner
+    attributes:
+      label: Agent runner and CLI version
+      placeholder: e.g. claude 2.1.0, codex 0.50.0, command (gemini)
+  - type: input
+    id: environment
+    attributes:
+      label: Kit version, Node version, OS
+      placeholder: e.g. 0.2.0 (kit-lock.json), Node 22.11, Ubuntu 24.04 with systemd
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant output from the CLI, run-loop.sh, or the browser console.
+      render: text

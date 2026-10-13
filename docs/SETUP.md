@@ -2,7 +2,8 @@
 
 ## Prerequisites
 
-Install Node 20, Java 21, the Firebase CLI, Google Cloud CLI, Git, and GitHub CLI.
+Install Node 20 or later, Git, and GitHub CLI. The firestore backend also needs
+the Firebase CLI, the Google Cloud CLI, and Java 21 (for the rules emulator).
 Loop runners need GNU coreutils (`brew install coreutils` on macOS for
 `gtimeout`; Linux distributions ship `timeout`) and at least one supported
 agent CLI. Xcode, Flutter, and XcodeGen are needed only for the
@@ -103,6 +104,11 @@ TestFlight is disabled in the sample configuration. To enable it, provide all
 the optional SwiftUI project with XcodeGen; validate `--check`; then set
 `"testflight": {}` (it keeps `requiresHumanAcceptance: true`) before adding
 TestFlight to any approved target set.
+
+## Extending
+
+[EXTENDING.md](EXTENDING.md) walks through adding an agent on any CLI, a runner
+adapter, a work kind, a deploy target, a backend, or a scheduler.
 
 ## Upgrading
 

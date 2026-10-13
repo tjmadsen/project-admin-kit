@@ -76,8 +76,9 @@ into the deploy gate for the dedicated deploy loop.
   to continue that history. Never recreate a branch the item already names.
 - Screenshots and comparison images go into the thread as attachments, not
   GitHub links: pass `--images a.png,b.png` (up to 10 files) with any `reply`,
-  `ask`, `pr`, or `deploy-pending` message. The CLI uploads them to Firebase
-  Storage and the admin console renders them inline.
+  `ask`, `pr`, or `deploy-pending` message. The CLI stores them with the configured
+  backend (Firebase Storage, or files beside the local store; the github
+  backend refuses `--images`) and the admin console renders them inline.
 - A deploy-loop conflict handback is an exceptional resume path, not a new
   review cycle. The handback note names the approved PR/branch plus its reviewed
   base and head audit SHAs. Fetch that recorded branch and `origin/$DEFAULT_BRANCH`,

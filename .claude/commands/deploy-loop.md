@@ -5,7 +5,7 @@ argument-hint: "[sol|terra|luna|opus|sonnet|fable|grok]"
 
 # Project Admin deploy loop
 
-Load the repository's project-specific names, branch, URLs, and Firebase target
+Load the repository's project-specific names, branch, URLs, and Firebase project (if any)
 before any command:
 
 ```bash
