@@ -26,7 +26,7 @@ independently with `deploy-check`; command success alone is not proof, and the
 item cannot close until each target has live proof plus contextual acceptance.
 Targets with `requiresHumanAcceptance` run last and return to
 `acceptance_review`; TestFlight is launched through
-`scripts/agent-loops/launch-testflight.sh` and must never be closed by the
+`extras/testflight/launch-testflight.sh` and must never be closed by the
 deploy loop.
 
 Pass `--as {{AGENT}}` on every backlog CLI command. Drain the deploy queue

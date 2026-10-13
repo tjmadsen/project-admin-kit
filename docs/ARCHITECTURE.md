@@ -9,8 +9,9 @@
 | `scripts/` | Backlog mutations through `scripts/lib/store/` and agent orchestration |
 | `scripts/local-server.js` | Loopback console server for the local backend |
 | `.claude/commands/` | Canonical per-kind (feature, bug, task) and deploy lifecycle policy |
-| `functions/` | Optional lifecycle email and FCM notifications |
-| `native-ios/` | Optional authenticated SwiftUI/WKWebView wrapper |
+| `extras/functions/` | Optional lifecycle email and FCM notifications (firestore backend) |
+| `extras/native-ios/` | Optional authenticated SwiftUI/WKWebView wrapper (firestore backend) |
+| `extras/testflight/` | Optional TestFlight upload, launch, and App Store Connect polling |
 
 ## Backlog store
 

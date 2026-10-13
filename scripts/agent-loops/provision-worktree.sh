@@ -34,7 +34,7 @@ TARGET="$(cd "$TARGET" && pwd)"
 # rather than fatal, so this list can name optional credentials.
 CONFIG_FILES=(auth.env)
 # Directories whose node_modules the worktree needs to run its suite.
-NODE_PACKAGES=(scripts admin-app functions)
+NODE_PACKAGES=(scripts admin-app extras/functions)
 
 plan() { printf '%s %s\n' "$1" "$2"; }
 

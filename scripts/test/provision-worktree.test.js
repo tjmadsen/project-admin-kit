@@ -59,7 +59,7 @@ test('a dry run lists the gitignored state a fresh worktree is missing and chang
   assert.equal(dryRun.status, 0, dryRun.stderr);
 
   const actions = plan(dryRun.stdout);
-  for (const target of ['scripts/node_modules', 'admin-app/node_modules', 'functions/node_modules']) {
+  for (const target of ['scripts/node_modules', 'admin-app/node_modules', 'extras/functions/node_modules']) {
     assert.ok(['symlink', 'npm-ci'].includes(actions[target]), `${target} must be provisioned, saw ${actions[target]}`);
   }
   assert.ok(['symlink', 'skip'].includes(actions['auth.env']), 'auth.env must be linked when the primary checkout has it');
@@ -86,7 +86,7 @@ test('PROJECT_ADMIN_PRIMARY_ROOT makes lockfile comparison independent of the sh
   const fixture = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'project-admin-primary-fixture-'));
   t.after(() => fs.rmSync(fixture, { recursive: true, force: true }));
 
-  for (const rel of ['scripts', 'admin-app', 'functions']) {
+  for (const rel of ['scripts', 'admin-app', 'extras/functions']) {
     fs.mkdirSync(path.join(fixture, rel, 'node_modules'), { recursive: true });
     fs.copyFileSync(path.join(worktree, rel, 'package-lock.json'), path.join(fixture, rel, 'package-lock.json'));
   }
@@ -97,7 +97,7 @@ test('PROJECT_ADMIN_PRIMARY_ROOT makes lockfile comparison independent of the sh
   const actions = plan(dryRun.stdout);
   assert.equal(actions['scripts/node_modules'], 'symlink');
   assert.equal(actions['admin-app/node_modules'], 'npm-ci');
-  assert.equal(actions['functions/node_modules'], 'symlink');
+  assert.equal(actions['extras/functions/node_modules'], 'symlink');
 });
 
 test('provisioning makes the backlog CLI runnable in the worktree and is idempotent', (t) => {
@@ -120,7 +120,7 @@ test('provisioning makes the backlog CLI runnable in the worktree and is idempot
   const actions = plan(second.stdout);
   assert.equal(actions['scripts/node_modules'], 'present');
   assert.equal(actions['admin-app/node_modules'], 'present');
-  assert.equal(actions['functions/node_modules'], 'present');
+  assert.equal(actions['extras/functions/node_modules'], 'present');
 });
 
 test('refuses the shared primary checkout and anything that is not a worktree', () => {

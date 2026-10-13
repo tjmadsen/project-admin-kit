@@ -58,7 +58,7 @@ const ALLOWED = [
   ['git worktree removal', 'git worktree remove .agent-worktrees/opus-bug-9 --force'],
   ['an ordinary push', 'git push -u origin opus/bug-9'],
   ['a firebase deploy', 'firebase deploy --only hosting --project example-project'],
-  ['a TestFlight upload', './scripts/upload-testflight.sh'],
+  ['a TestFlight upload', './extras/testflight/upload-testflight.sh'],
   ['a non-recursive delete', 'rm build/app.log'],
   ['a git clean dry run', 'git clean -n'],
 ];

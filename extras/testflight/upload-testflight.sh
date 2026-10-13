@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # Build and upload the repository's Flutter product to TestFlight.
-# Usage: scripts/upload-testflight.sh [unique-build-number]
+# Usage: extras/testflight/upload-testflight.sh [unique-build-number]
+#
+# The Flutter product is PROJECT_ADMIN_PRODUCT_ROOT (testflight-autoship.sh sets
+# it to the release worktree), else the configured product root (docs/LAYOUTS.md).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-PRODUCT_ROOT="${PROJECT_ADMIN_PRODUCT_ROOT:-$REPO_ROOT}"
+KIT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PRODUCT_ROOT="${PROJECT_ADMIN_PRODUCT_ROOT:-$(node "$KIT_ROOT/scripts/project-env.js" value PRODUCT_ROOT 2>/dev/null || echo "$KIT_ROOT")}"
 REQUESTED_BUILD="${1:-}"
 BUILD_NUMBER="${REQUESTED_BUILD:-$(date +%y%m%d%H%M)}"
 API_KEY_ID="${PROJECT_ADMIN_ASC_KEY_ID:?Set PROJECT_ADMIN_ASC_KEY_ID}"
@@ -23,7 +26,7 @@ command -v flutter >/dev/null || { echo "Flutter is not installed" >&2; exit 1; 
 command -v xcodebuild >/dev/null || { echo "Xcode command-line tools are not installed" >&2; exit 1; }
 
 if [[ "$REQUESTED_BUILD" == "--check" ]]; then
-  node "$REPO_ROOT/scripts/agent-loops/asc-poll-build.js" --check
+  node "$SCRIPT_DIR/asc-poll-build.js" --check
   xcodebuild -workspace "$PRODUCT_ROOT/ios/Runner.xcworkspace" -scheme Runner -list >/dev/null
   echo "TestFlight preflight passed for $APP_BUNDLE_ID"
   exit 0
@@ -35,7 +38,7 @@ BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/project-testflight.XXXXXX")"
 ARCHIVE_PATH="$BUILD_DIR/ProjectApp.xcarchive"
 EXPORT_PATH="$BUILD_DIR/export"
 EXPORT_OPTIONS_PATH="$BUILD_DIR/ExportOptions.plist"
-sed "s/REPLACE_WITH_APPLE_TEAM_ID/$TEAM_ID/g" "$REPO_ROOT/scripts/ExportOptions.plist" > "$EXPORT_OPTIONS_PATH"
+sed "s/REPLACE_WITH_APPLE_TEAM_ID/$TEAM_ID/g" "$SCRIPT_DIR/ExportOptions.plist" > "$EXPORT_OPTIONS_PATH"
 cleanup() { rm -rf "$BUILD_DIR"; }
 # macOS /bin/bash is 3.2, which reports status 0 inside an EXIT trap after a
 # fatal shell error (for example an unbound variable under set -u). A plain

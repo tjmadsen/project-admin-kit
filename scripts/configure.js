@@ -39,6 +39,11 @@ function writeJson(file, value) {
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
 }
 
+function writeExtraJson(relative, value) {
+  const file = path.join(ROOT, relative);
+  if (fs.existsSync(path.dirname(file))) writeJson(file, value);
+}
+
 function updateMarketingPage(config) {
   const file = path.join(ROOT, 'public/index.html');
   let html = fs.readFileSync(file, 'utf8');
@@ -110,12 +115,13 @@ function main() {
     headers: [{ key: 'Cache-Control', value: 'no-cache, no-store, must-revalidate' }],
   }));
   writeJson(path.join(ROOT, 'firebase.json'), firebaseConfig);
-  writeJson(path.join(ROOT, 'functions/project-config.json'), {
+  // Optional extras (extras/README.md) are configured only when installed.
+  writeExtraJson('extras/functions/project-config.json', {
     projectName: config.project.name,
     ownerEmail: config.admin.ownerEmail,
     adminBaseUrl: `${config.project.productionUrl.replace(/\/$/, '')}${config.project.adminPath}`,
   });
-  writeJson(path.join(ROOT, 'native-ios/ProjectAdminConfig.json'), {
+  writeExtraJson('extras/native-ios/ProjectAdminConfig.json', {
     projectName: config.project.name,
     adminURL: `${config.project.productionUrl.replace(/\/$/, '')}${config.project.adminPath.replace(/\/$/, '')}/`,
   });

@@ -1,0 +1,12 @@
+{
+  "name": "project-admin-testflight",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Optional TestFlight release tooling for Project Admin (extras/README.md)",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}

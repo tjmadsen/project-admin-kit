@@ -18,7 +18,7 @@ function copyKit(t) {
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   for (const relative of [
     'project-admin.config.json', 'firebase.json', 'public/index.html',
-    'functions/project-config.json', 'native-ios/ProjectAdminConfig.json',
+    'extras/functions/project-config.json', 'extras/native-ios/ProjectAdminConfig.json',
     'scripts/configure.js', 'scripts/project-env.js', 'scripts/lib/project-config.js',
     'scripts/lib/agent-roster.js', 'scripts/lib/agent-defaults.json',
     'scripts/lib/work-kinds.js', 'scripts/lib/work-kinds.defaults.json',
@@ -65,7 +65,7 @@ test('configure applies a new project identity across deployable surfaces', (t) 
   const firebase = readJson(path.join(root, 'firebase.json'));
   assert.equal(firebase.hosting.rewrites[0].source, '/control');
   assert.equal(readJson(path.join(root, '.firebaserc')).projects.default, 'rocket-notes-prod');
-  const functionsConfig = readJson(path.join(root, 'functions/project-config.json'));
+  const functionsConfig = readJson(path.join(root, 'extras/functions/project-config.json'));
   assert.deepEqual({ ...functionsConfig, workKinds: undefined }, {
     projectName: 'Rocket Notes', ownerEmail: 'owner@example.com', adminBaseUrl: 'https://rocket.example/control', workKinds: undefined,
   });

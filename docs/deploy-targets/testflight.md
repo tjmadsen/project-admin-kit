@@ -6,25 +6,26 @@ for every approved release that names this target. `$DEPLOY_WT`, `$ITEM_REF`,
 merge step; project values come from `scripts/project-env.js shell`.
 
 **Preconditions:** TestFlight is always last when combined with other targets. Use an isolated
-worktree at merged `origin/$DEFAULT_BRANCH`. The product client uses
-`scripts/upload-testflight.sh`; the optional native admin wrapper uses
-`scripts/upload-admin-testflight.sh`. The approved notes must provide the intended
-bundle ID and say which app is intended.
+worktree at merged `origin/$DEFAULT_BRANCH`. This target needs the optional
+TestFlight extra (`extras/testflight/`, see `extras/README.md`) and macOS. The
+product client uses `upload-testflight.sh`; the optional native admin wrapper
+(`extras/native-ios/`) uses `upload-admin-testflight.sh`. The approved notes must
+provide the intended bundle ID and say which app is intended.
 
 ```bash
 PROJECT_ADMIN_COLLECTION='workItems'
-PROJECT_ADMIN_UPLOAD_SCRIPT='scripts/upload-testflight.sh'
+PROJECT_ADMIN_UPLOAD_SCRIPT='upload-testflight.sh'
 PROJECT_ADMIN_BUNDLE_ID='<approved product bundle id>'
 # For Project Admin instead use:
-# PROJECT_ADMIN_UPLOAD_SCRIPT='scripts/upload-admin-testflight.sh'
+# PROJECT_ADMIN_UPLOAD_SCRIPT='upload-admin-testflight.sh'
 # PROJECT_ADMIN_BUNDLE_ID='<configured native admin bundle id>'
 
-if [[ "$PROJECT_ADMIN_UPLOAD_SCRIPT" == 'scripts/upload-testflight.sh' ]]; then
+if [[ "$PROJECT_ADMIN_UPLOAD_SCRIPT" == 'upload-testflight.sh' ]]; then
   gtimeout 10m bash -c 'cd "$1" && exec flutter pub get' _ "$DEPLOY_WT"
   gtimeout 20m bash -c 'cd "$1" && exec flutter build ios --config-only --release' _ "$DEPLOY_WT"
 fi
-gtimeout 10m "$DEPLOY_WT/$PROJECT_ADMIN_UPLOAD_SCRIPT" --check
-gtimeout 10m scripts/agent-loops/launch-testflight.sh \
+gtimeout 10m env PROJECT_ADMIN_PRODUCT_ROOT="$DEPLOY_WT" "$DEPLOY_KIT/extras/testflight/$PROJECT_ADMIN_UPLOAD_SCRIPT" --check
+gtimeout 10m "$KIT_ROOT/extras/testflight/launch-testflight.sh" \
   "$PROJECT_ADMIN_COLLECTION" "$ITEM_ID" "$AGENT" "$DEPLOY_WT" \
   "$ITEM_REF — <title>" "$PROJECT_ADMIN_UPLOAD_SCRIPT" "$PROJECT_ADMIN_BUNDLE_ID"
 ```

@@ -137,7 +137,7 @@ test('AGENTS.md carries the runnable test matrix and CLAUDE.md defers to it', ()
   const agents = read('AGENTS.md');
   for (const command of [
     'cd admin-app && npm test',
-    'cd functions && npm test',
+    'cd extras/functions && npm test',
     'cd scripts && npm test',
     'firebase emulators:exec --only firestore,storage',
     'node scripts/work-agent.js --kind feature count --as terra',

@@ -24,13 +24,15 @@ The configuration command updates:
 
 - `project-admin.config.json` for the web console and Node tools;
 - `.firebaserc` and `firebase.json` for deployment;
-- `functions/project-config.json` for notification branding;
-- `native-ios/ProjectAdminConfig.json` for the optional wrapper;
+- `extras/functions/project-config.json` for notification branding;
+- `extras/native-ios/ProjectAdminConfig.json` for the optional wrapper
+  (both only when `extras/` is present; see `extras/README.md`);
 - the machine roster and placeholder marketing page.
 
 ## 2. Install and bootstrap
 
-Run `npm run install:all`, authenticate Application Default Credentials with
+Run `npm run install:all` (plus `npm run install:extras` if you use the
+lifecycle Functions), authenticate Application Default Credentials with
 `gcloud auth application-default login`, then run `npm run bootstrap-admin`.
 The owner email from project configuration becomes the first active admin.
 
@@ -43,7 +45,8 @@ collaborators are the access list.
 
 ## 3. Verify locally
 
-Run `npm test`, `npm run test:rules`, and `npm run build`. Start the Hosting and
+Run `npm test`, `npm run test:rules`, and `npm run build` (and
+`npm run test:extras` when you keep the extras). Start the Hosting and
 Firestore emulators for interactive work, or use `npm --prefix admin-app run dev`
 against a development Firebase project.
 

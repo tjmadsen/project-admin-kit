@@ -215,11 +215,11 @@ function derivedFiles(kinds) {
   return [
     ['firestore.rules', (text, file) => replaceGeneratedBlock(text, renderFirestoreRulesBlock(kinds), file)],
     ['storage.rules', (text, file) => replaceGeneratedBlock(text, renderStorageRulesBlock(kinds), file)],
-    ['functions/project-config.json', (text) => jsonText({
+    ['extras/functions/project-config.json', (text) => jsonText({
       ...JSON.parse(text),
       workKinds: Object.fromEntries(kinds.map((kind) => [kind.id, { label: kind.label, prefix: kind.prefix, route: kind.route }])),
     })],
-    ['native-ios/ProjectAdminConfig.json', (text) => jsonText({
+    ['extras/native-ios/ProjectAdminConfig.json', (text) => jsonText({
       ...JSON.parse(text),
       workItemRoutes: Object.fromEntries(kinds.map((kind) => [kind.route, kind.prefix])),
     })],
@@ -227,7 +227,8 @@ function derivedFiles(kinds) {
 }
 
 // Rewrites (or with write=false, only reports) every derived file that differs
-// from the configured kinds. Missing optional surfaces are skipped.
+// from the configured kinds. Missing optional surfaces (an install without
+// extras/) are skipped.
 function syncDerivedFiles({ root = ROOT, kinds = loadWorkKinds(), write = true } = {}) {
   const changed = [];
   for (const [relative, transform] of derivedFiles(kinds)) {

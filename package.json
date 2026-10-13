@@ -14,12 +14,15 @@
     "migrate:work-items": "node scripts/migrate-work-items.js",
     "loops": "node scripts/agent-loops/scheduler.js",
     "build": "npm --prefix admin-app run build",
-    "test": "npm run test:admin && npm run test:functions && npm run test:agents",
+    "test": "npm run test:admin && npm run test:agents",
     "test:admin": "npm --prefix admin-app test",
-    "test:functions": "npm --prefix functions test",
+    "test:functions": "npm --prefix extras/functions test",
+    "test:testflight": "npm --prefix extras/testflight test",
+    "test:extras": "npm run test:functions && npm run test:testflight",
     "test:agents": "npm --prefix scripts test",
     "test:rules": "firebase emulators:exec --only firestore,storage --project demo-project-admin \"npm --prefix admin-app run test:rules\"",
-    "install:all": "npm ci --prefix admin-app && npm ci --prefix functions && npm ci --prefix scripts"
+    "install:all": "npm ci --prefix admin-app && npm ci --prefix scripts",
+    "install:extras": "npm ci --prefix extras/functions"
   },
   "license": "MIT"
 }

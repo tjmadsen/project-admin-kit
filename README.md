@@ -34,7 +34,8 @@ repository so isolated agent worktrees and PR release proofs remain coherent.
 - Human-gated Firebase Hosting, Functions, rules/indexes, Vercel, Flutter web,
   Cloud Run, and TestFlight runbooks; deploy targets are configuration
   (`deployments.targets`), so a new surface is a config entry plus a runbook.
-- Optional lifecycle email/push Functions and SwiftUI iOS admin shell.
+- Optional extras in `extras/`: lifecycle email/push Functions, a SwiftUI iOS
+  admin shell, and TestFlight release tooling ([extras/README.md](extras/README.md)).
 - CI, screenshot harness, configuration/bootstrap tooling, and a placeholder
   marketing page.
 
@@ -79,7 +80,7 @@ See [docs/SETUP.md](docs/SETUP.md) for the full first-run checklist and
 ```bash
 npm --prefix admin-app run dev
 npm --prefix admin-app test
-npm --prefix functions test
+npm run test:extras          # optional extras/ (Functions, TestFlight)
 npm --prefix scripts test
 ```
 

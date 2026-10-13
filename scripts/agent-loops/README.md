@@ -185,7 +185,8 @@ default, thirty for Grok), and the deploy dispatcher every fifteen minutes.
 
 On Linux the loops need GNU coreutils `timeout`; `run-loop.sh` puts a
 `gtimeout` alias on the agent's PATH because the runbooks use Homebrew's name.
-TestFlight releases (`launch-testflight.sh`) remain macOS-only.
+TestFlight releases (the optional `extras/testflight/launch-testflight.sh`)
+remain macOS-only.
 
 ## Run loops in the foreground
 

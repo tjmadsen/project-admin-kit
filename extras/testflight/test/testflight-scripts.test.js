@@ -1,7 +1,7 @@
 'use strict';
 
 // Regression tests for the FR-8 TestFlight release failure: build 2609021637
-// died in scripts/upload-testflight.sh on `DART_DEFINES[@]: unbound variable`
+// died in upload-testflight.sh on `DART_DEFINES[@]: unbound variable`
 // (bash 3.2 under set -u with an empty array), the EXIT trap turned that fatal
 // error into exit status 0, and testflight-autoship.sh then polled App Store
 // Connect for 45 minutes for a build that was never uploaded.
@@ -14,12 +14,13 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
+// The TestFlight extra: extras/testflight/ (docs in extras/README.md).
 const scriptsDir = path.resolve(__dirname, '..');
 const BASH = '/bin/bash'; // macOS ships bash 3.2 and the release loop runs the scripts under it.
 const hasBash = fs.existsSync(BASH);
 const uploadScripts = ['upload-testflight.sh', 'upload-admin-testflight.sh'];
-const autoshipScript = path.join(scriptsDir, 'agent-loops', 'testflight-autoship.sh');
-const ascPollScript = path.join(scriptsDir, 'agent-loops', 'asc-poll-build.js');
+const autoshipScript = path.join(scriptsDir, 'testflight-autoship.sh');
+const ascPollScript = path.join(scriptsDir, 'asc-poll-build.js');
 
 function tempDir(t, prefix) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -179,10 +180,10 @@ function runAutoship(t, uploadScriptBody) {
   const buildFile = path.join(bin, 'build-number');
   writeExecutable(
     path.join(bin, 'node'),
-    '#!/bin/sh\nprintf "node %s\\n" "$*" >> "$PROJECT_ADMIN_FAKE_CALLS"\ncase "$1:$2:$3" in *project-env.js:value:STATE_DIRECTORY) echo ".project-admin" ;; *project-env.js:value:LOG_DIRECTORY_NAME) echo "ProjectAdminAgentLoops" ;; esac\ncase "$*" in *asc-poll-build.js*) echo "VALID id=fake" ;; esac\nexit 0\n'
+    '#!/bin/sh\nprintf "node %s\\n" "$*" >> "$PROJECT_ADMIN_FAKE_CALLS"\ncase "$1:$2:$3" in *project-env.js:value:STATE_DIRECTORY) echo ".project-admin" ;; *project-env.js:value:LOG_DIRECTORY_NAME) echo "ProjectAdminAgentLoops" ;; *project-env.js:value:KIT_SUBDIR) echo "." ;; esac\ncase "$*" in *asc-poll-build.js*) echo "VALID id=fake" ;; esac\nexit 0\n'
   );
   writeExecutable(
-    path.join(worktree, 'scripts', 'upload-testflight.sh'),
+    path.join(worktree, 'extras', 'testflight', 'upload-testflight.sh'),
     `#!/bin/sh\nprintf "%s" "$1" > "${buildFile}"\n${uploadScriptBody}`
   );
   const result = runBash(
