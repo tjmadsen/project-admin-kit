@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# launchd entry point for one headless loop iteration.
+# Scheduler entry point (launchd, systemd, cron, or scheduler.js) for one
+# headless loop iteration.
 #
 #   Usage: loop-wrapper.sh <agent-token|configured> <work-kind|deploy>
 #
@@ -34,16 +35,16 @@ fi
 # Queues are the configured work kinds plus `deploy`.
 node "$WORK_KINDS_HELPER" queues 2>/dev/null | grep -qxF -- "$QUEUE" || usage
 
-# QoS fix. Every loop plist sets ProcessType=Background, which on Apple Silicon
-# confines this process AND everything it spawns (run-loop.sh, the agent CLI,
-# node, git) to the E-cores. Under load that starves the whole tree — `git
-# status` took 185 s against ~0.1 s — and the CLI's own child processes miss
-# their internal timeouts, so it spins instead of failing and holds the
+# QoS fix (macOS only). Every loop plist sets ProcessType=Background, which on
+# Apple Silicon confines this process AND everything it spawns (run-loop.sh, the
+# agent CLI, node, git) to the E-cores. Under load that starves the whole tree —
+# `git status` took 185 s against ~0.1 s — and the CLI's own child processes
+# miss their internal timeouts, so it spins instead of failing and holds the
 # single-instance lock for hours. `taskpolicy -a` restores normal QoS for the
 # whole tree; `taskpolicy -B` is NOT a substitute because it clears an explicit
 # background policy rather than the inherited QoS class. Sentinel-guarded so the
-# re-exec happens exactly once.
-if [[ -z "${PROJECT_ADMIN_LOOP_QOS_FIXED:-}" ]] && command -v taskpolicy >/dev/null 2>&1; then
+# re-exec happens exactly once. systemd and cron apply no such demotion.
+if [[ -z "${PROJECT_ADMIN_LOOP_QOS_FIXED:-}" && "$(uname -s)" == "Darwin" ]] && command -v taskpolicy >/dev/null 2>&1; then
   export PROJECT_ADMIN_LOOP_QOS_FIXED=1
   exec taskpolicy -a "$0" "$@"
 fi
@@ -63,6 +64,17 @@ LOCK="$STATE_DIR/$QUEUE-loop-$TOKEN.lock"
 POLL_LOG="$STATE_DIR/logs/poll-$QUEUE-$TOKEN.log"
 
 mkdir -p "$STATE_DIR" "$STATE_DIR/logs"
+
+# Schedulers start jobs with a minimal environment and unit files are no place
+# for secrets, so per-host values (a notification webhook URL, CLI API keys in a
+# container) live in an optional env file next to the locks.
+LOOP_ENV_FILE="${PROJECT_ADMIN_LOOP_ENV_FILE:-$STATE_DIR/loops.env}"
+if [[ -f "$LOOP_ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$LOOP_ENV_FILE"
+  set +a
+fi
 plog() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $QUEUE/$TOKEN $*" | tee -a "$POLL_LOG"; }
 
 # Single-instance guard per (queue,token). launchd fires on an interval whether

@@ -163,7 +163,34 @@
     "automation": {
       "type": "object",
       "required": ["defaultMachineId", "defaultMachineLabel", "defaultWorkAgent", "defaultDeployAgent", "stateDirectory", "logDirectoryName"],
+      "properties": {
+        "scheduler": {
+          "enum": ["launchd", "systemd", "cron", "foreground"],
+          "description": "How provision-machine.sh schedules loops. Default: launchd on macOS, systemd (user timers) on Linux, foreground (npm run loops) elsewhere."
+        }
+      },
       "additionalProperties": { "type": "string" }
+    },
+    "notifications": {
+      "description": "Loop alert channels (e.g. an expired headless CLI session). Omit for a desktop alert only.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "desktop": { "type": "boolean", "description": "osascript on macOS, notify-send on Linux when installed; default true." },
+        "webhook": {
+          "oneOf": [
+            { "type": "boolean" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "urlEnv": { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$", "description": "Environment variable holding the webhook URL (default PROJECT_ADMIN_NOTIFY_WEBHOOK_URL). Nothing is sent while it is unset." },
+                "format": { "enum": ["json", "slack", "ntfy"], "description": "json: POST {title, message, level}; slack: incoming-webhook {text}; ntfy: plain body with Title/Priority/Tags headers." }
+              }
+            }
+          ]
+        }
+      }
     },
     "deployments": {
       "description": "Deploy targets the deploy loop may execute. Use { \"targets\": { ... } }; the legacy flat boolean map (firebaseHosting, testflight, ...) still loads and keeps every built-in target enabled. Omit for every built-in target. `none` is built in and reserved.",

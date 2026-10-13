@@ -27,6 +27,7 @@ const ROSTER_FILES = [
   'scripts/lib/work-kinds.defaults.json',
   'scripts/lib/deploy-targets.js',
   'scripts/lib/deploy-targets.defaults.json',
+  'scripts/lib/automation.js',
 ];
 
 function copyRosterFiles(root) {
@@ -70,6 +71,7 @@ if [[ "\${1:-}" == "-e" ]]; then exec ${REAL_NODE} "$@"; fi
 name="$(basename "\${1:-}")"
 case "$name" in
   classify-run-result.js|agents.js|work-kinds.js) exec ${REAL_NODE} "$@" ;;
+  notify.js) shift; echo "NOTIFY_JS: $*" >> ${record} ;;
   log-run.js)
     echo "LOG_RUN_ARGV: $*" >> ${record}
     case "\${2:-}" in
@@ -103,6 +105,7 @@ exec "$@"
 
   write(path.join(bin, 'claude'), `#!/usr/bin/env bash
 { echo "CLAUDE_CEILING: \${CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS:-unset}"
+  echo "CLAUDE_GTIMEOUT: $(command -v gtimeout || echo none)"
   echo "CLAUDE_ARGV: $*"
   echo "CLAUDE_STDIN<<"; cat; echo ">>CLAUDE_STDIN"; } >> ${record}
 echo "\${PROJECT_ADMIN_TEST_AGENT_OUTPUT:-worked one item}"
@@ -197,6 +200,28 @@ test('an expired session fails the run, names the reason, and notifies once per 
   const second = runLoop(sandbox, 'sonnet', 'bug', authEnv);
   assert.equal(second.status, 78);
   assert.equal((second.record.match(/^NOTIFY: /gm) || []).length, 1, 'a concurrent loop reuses the shared stamp instead of alerting again');
+});
+
+test('without an override the auth alert goes through notify.js with a level, title, and message', () => {
+  const sandbox = makeSandbox();
+  const { status, record } = runLoop(sandbox, 'opus', 'bug', {
+    PROJECT_ADMIN_LOOP_NOTIFIER: '',
+    PROJECT_ADMIN_TEST_AGENT_EXIT: '1',
+    PROJECT_ADMIN_TEST_AGENT_OUTPUT: 'OAuth session expired; please run /login',
+  });
+  assert.equal(status, 78);
+  assert.match(record, /^NOTIFY_JS: --level error --title Project Admin loops: auth expired --message Headless agent loops on \S* ?cannot authenticate \(opus x bug\)/m);
+  assert.doesNotMatch(record, /osascript/);
+});
+
+test('the runner gives the agent a gtimeout when only coreutils timeout exists', () => {
+  const sandbox = makeSandbox();
+  const { status, record } = runLoop(sandbox, 'opus', 'bug');
+  assert.equal(status, 0);
+  if (fs.existsSync('/usr/bin/gtimeout') || fs.existsSync('/bin/gtimeout')) return;
+  const shim = record.match(/^CLAUDE_GTIMEOUT: (.*)$/m)[1];
+  assert.notEqual(shim, 'none', 'the runbooks call gtimeout, so it must resolve on Linux too');
+  assert.equal(fs.realpathSync(shim), fs.realpathSync(path.join(sandbox.bin, 'timeout')));
 });
 
 test('a clean run is not mistaken for an auth failure', () => {
@@ -377,6 +402,19 @@ test('the wrapper refreshes its worktree to the configured default branch on eve
   assert.ok(!fs.existsSync(path.join(worktree, 'stray.txt')), 'untracked leftovers are cleaned');
 });
 
+test('the wrapper exports the optional per-host loops.env to the run', () => {
+  const sandbox = makeWrapperSandbox();
+  write(path.join(sandbox.repo, 'scripts/agent-loops/run-loop.sh'), `#!/usr/bin/env bash
+echo "RUN_LOOP_ENV: \${PROJECT_ADMIN_NOTIFY_WEBHOOK_URL:-unset}" >> ${sandbox.record}
+`, 0o755);
+  execFileSync('git', ['commit', '-qam', 'record env'], { cwd: sandbox.repo });
+  execFileSync('git', ['push', '-q', 'origin', 'master'], { cwd: sandbox.repo });
+  write(path.join(sandbox.root, 'state/loops.env'), 'PROJECT_ADMIN_NOTIFY_WEBHOOK_URL=https://ntfy.example/loops\n');
+  const { status, record } = runWrapper(sandbox, 'opus', 'bug');
+  assert.equal(status, 0);
+  assert.match(record, /RUN_LOOP_ENV: https:\/\/ntfy\.example\/loops/);
+});
+
 test('the wrapper rejects an unknown token or queue', () => {
   const sandbox = makeWrapperSandbox();
   const unknown = runWrapper(sandbox, 'nobody', 'bug');
@@ -395,8 +433,9 @@ test('the wrapper canonicalizes an alias so it shares the agent\'s lock and work
 
 test('launchd points at the wrapper and the wrapper restores normal QoS once', () => {
   const wrapper = fs.readFileSync(path.join(AGENT_LOOPS, 'loop-wrapper.sh'), 'utf8');
-  const plist = fs.readFileSync(path.join(AGENT_LOOPS, 'launchd.plist.template'), 'utf8');
+  const plist = fs.readFileSync(path.join(AGENT_LOOPS, 'schedulers', 'launchd.plist.template'), 'utf8');
   assert.match(wrapper, /PROJECT_ADMIN_LOOP_QOS_FIXED=1\n\s*exec taskpolicy -a "\$0" "\$@"/);
+  assert.match(wrapper, /"\$\(uname -s\)" == "Darwin" \]\] && command -v taskpolicy/, 'the re-exec never runs off macOS');
   assert.match(plist, /loop-wrapper\.sh/);
   assert.doesNotMatch(plist, /run-loop\.sh/, 'launchd no longer invokes the runner directly');
   assert.doesNotMatch(plist, /WorkingDirectory/, 'no launchd job starts in the shared primary checkout');

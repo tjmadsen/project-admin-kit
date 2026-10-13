@@ -135,6 +135,10 @@
     "codex": "terra",
     "claude": "sonnet"
   },
+  "notifications": {
+    "desktop": true,
+    "webhook": { "urlEnv": "PROJECT_ADMIN_NOTIFY_WEBHOOK_URL", "format": "json" }
+  },
   "deployments": {
     "targets": {
       "testflight": { "enabled": false },

@@ -8,16 +8,24 @@ QUEUE_NAME="${2:-}"
 RUN_MODE="${3:---once}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-DEFAULT_MACHINE_ID="$(node "$REPO_ROOT/scripts/project-env.js" value DEFAULT_MACHINE_ID)"
 STATE_DIRECTORY="$(node "$REPO_ROOT/scripts/project-env.js" value STATE_DIRECTORY)"
-MACHINE_ID="${PROJECT_ADMIN_MACHINE_ID:-$DEFAULT_MACHINE_ID}"
+# PROJECT_ADMIN_MACHINE_ID (set by every scheduler) wins; otherwise the roster
+# entry whose `hostnames` names this host, then automation.defaultMachineId.
+MACHINE_ID="${PROJECT_ADMIN_MACHINE_ID:-$(node "$REPO_ROOT/scripts/project-env.js" value MACHINE_ID)}"
 INTERVAL_SECONDS="${PROJECT_ADMIN_LOOP_INTERVAL_SECONDS:-1800}"
 PROGRESS_INTERVAL_SECONDS="${PROJECT_ADMIN_LOOP_PROGRESS_SECONDS:-900}"
 AGENTS_HELPER="$REPO_ROOT/scripts/lib/agents.js"
 WORK_KINDS_HELPER="$REPO_ROOT/scripts/lib/work-kinds.js"
 AUTH_ALERT_STAMP="${PROJECT_ADMIN_LOOP_AUTH_STAMP:-$HOME/$STATE_DIRECTORY/loop-auth-alert.stamp}"
 AUTH_ALERT_DEBOUNCE_SECONDS="${PROJECT_ADMIN_LOOP_AUTH_DEBOUNCE_SECONDS:-1800}"
-NOTIFIER="${PROJECT_ADMIN_LOOP_NOTIFIER:-osascript}"
+# Alerts go through notify.js (desktop and/or webhook per `notifications`).
+# PROJECT_ADMIN_LOOP_NOTIFIER replaces it with any command taking the same
+# --title/--message/--level arguments.
+if [[ -n "${PROJECT_ADMIN_LOOP_NOTIFIER:-}" ]]; then
+  NOTIFIER=("$PROJECT_ADMIN_LOOP_NOTIFIER")
+else
+  NOTIFIER=(node "$SCRIPT_DIR/notify.js")
+fi
 
 # A headless CLI whose OAuth session expired cannot re-authenticate itself, so
 # every queue silently reports "no work" until a human runs `claude setup-token`
@@ -89,7 +97,17 @@ if [[ -n "$PA_USAGE_PROVIDER" ]]; then
 fi
 
 TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
-[[ -n "$TIMEOUT_BIN" ]] || { echo "timeout is required (brew install coreutils)" >&2; exit 1; }
+if [[ -z "$TIMEOUT_BIN" ]]; then
+  if [[ "$(uname -s)" == "Darwin" ]]; then echo "timeout is required (brew install coreutils)" >&2
+  else echo "timeout is required (install GNU coreutils)" >&2; fi
+  exit 1
+fi
+# The runbooks bound every command with `gtimeout` (Homebrew's name). On Linux
+# coreutils only installs `timeout`, so give the agent a gtimeout on its PATH.
+if ! command -v gtimeout >/dev/null 2>&1; then
+  SHIM_DIR="$HOME/$STATE_DIRECTORY/bin"
+  mkdir -p "$SHIM_DIR" && ln -sfn "$TIMEOUT_BIN" "$SHIM_DIR/gtimeout" && export PATH="$SHIM_DIR:$PATH"
+fi
 
 count_queue() {
   if [[ "$QUEUE_NAME" == "deploy" ]]; then
@@ -105,8 +123,8 @@ capture_usage() {
   PA_USAGE_PROVIDER="$PA_USAGE_PROVIDER" "$USAGE_CAPTURE" >/dev/null 2>&1 || true
 }
 
-# One macOS notification per debounce window, shared by every concurrent loop,
-# so seven wedged queues cannot fire seven alerts for the same expired session.
+# One notification per debounce window, shared by every concurrent loop, so
+# seven wedged queues cannot fire seven alerts for the same expired session.
 notify_auth_failure() {
   local now_seconds last_seconds=0
   echo "run-loop: AUTH FAILURE ($AGENT_TOKEN x $QUEUE_NAME) - the headless CLI needs re-auth" >&2
@@ -116,8 +134,8 @@ notify_auth_failure() {
   (( now_seconds - last_seconds > AUTH_ALERT_DEBOUNCE_SECONDS )) || return 0
   mkdir -p "$(dirname "$AUTH_ALERT_STAMP")" 2>/dev/null || true
   echo "$now_seconds" > "$AUTH_ALERT_STAMP" 2>/dev/null || true
-  command -v "$NOTIFIER" >/dev/null 2>&1 || return 0
-  "$NOTIFIER" -e 'display notification "Headless agent loops cannot authenticate. Run: claude setup-token (or codex login). Loops are idle until fixed." with title "Project Admin loops: auth expired" sound name "Basso"' >/dev/null 2>&1 || true
+  "${NOTIFIER[@]}" --level error --title "Project Admin loops: auth expired" \
+    --message "Headless agent loops on $MACHINE_ID cannot authenticate ($AGENT_TOKEN x $QUEUE_NAME). Run: claude setup-token (or codex login). Loops are idle until fixed." >&2 || true
 }
 
 run_once() {

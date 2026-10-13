@@ -75,7 +75,9 @@ export interface ProjectAdminConfig {
     defaultDeployAgent: string
     stateDirectory: string
     logDirectoryName: string
+    scheduler?: 'launchd' | 'systemd' | 'cron' | 'foreground'
   }
+  notifications?: { desktop?: boolean; webhook?: boolean | { urlEnv?: string; format?: 'json' | 'slack' | 'ntfy' } }
   deployments?: DeploymentsConfig
   agents?: AgentConfigEntry[]
   agentAliases?: Record<string, string>

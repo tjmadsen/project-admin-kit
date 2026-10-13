@@ -1,16 +1,37 @@
 #!/usr/bin/env bash
-# Install or inspect the macOS launchd jobs that poll each agent-owned queue.
+# Install or inspect the scheduled jobs that poll each agent-owned queue.
+#
+#   provision-machine.sh check                 readiness of CLIs, credentials, roster
+#   provision-machine.sh install [--dry-run]   (re)install one job per entitlement
+#   provision-machine.sh status                list the installed jobs
+#   provision-machine.sh uninstall             remove every installed loop job
+#
+# The scheduler is `automation.scheduler` in project-admin.config.json
+# (launchd on macOS and systemd on Linux by default; also cron or foreground),
+# or PROJECT_ADMIN_SCHEDULER for one invocation. schedulers/index.js renders
+# the units from the machine roster; this script only applies them.
 set -euo pipefail
 
 ACTION="${1:-check}"
+OPTION="${2:-}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-DEFAULT_MACHINE_ID="$(node "$REPO_ROOT/scripts/project-env.js" value DEFAULT_MACHINE_ID)"
-MACHINE_ID="${PROJECT_ADMIN_MACHINE_ID:-$DEFAULT_MACHINE_ID}"
+PROJECT_ENV="$REPO_ROOT/scripts/project-env.js"
+SCHEDULER="${PROJECT_ADMIN_SCHEDULER:-$(node "$PROJECT_ENV" value SCHEDULER)}"
+MACHINE_ID="${PROJECT_ADMIN_MACHINE_ID:-$(node "$PROJECT_ENV" value MACHINE_ID)}"
+export PROJECT_ADMIN_MACHINE_ID="$MACHINE_ID"
+LOG_DIR="$(node "$PROJECT_ENV" value LOOP_LOG_DIR)"
 LAUNCH_DIR="$HOME/Library/LaunchAgents"
-LOG_DIRECTORY_NAME="$(node "$REPO_ROOT/scripts/project-env.js" value LOG_DIRECTORY_NAME)"
-LOG_DIR="$HOME/Library/Logs/$LOG_DIRECTORY_NAME"
+SYSTEMD_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 AGENTS_HELPER="$REPO_ROOT/scripts/lib/agents.js"
+UNITS="$SCRIPT_DIR/schedulers/index.js"
+# Tests and CI set this to skip the live readiness check and the Firestore reap.
+OFFLINE="${PROJECT_ADMIN_PROVISION_OFFLINE:-}"
+
+case "$SCHEDULER" in
+  launchd|systemd|cron|foreground) ;;
+  *) echo "Unknown scheduler \"$SCHEDULER\" (launchd, systemd, cron, or foreground)" >&2; exit 2 ;;
+esac
 
 check_binary() {
   local label="$1" binary="$2"
@@ -38,17 +59,34 @@ check_agent() (
   [[ "$PA_GUARDED" == "1" ]] || printf '⚠ %-10s unguarded: the %s runner does not enforce headless-guard.py%s\n' "$agent" "$PA_RUNNER" "${PA_SANDBOX:+ (sandbox: $PA_SANDBOX)}"
 )
 
+check_scheduler() {
+  case "$SCHEDULER" in
+    launchd) check_binary launchctl launchctl ;;
+    systemd)
+      check_binary systemctl systemctl || return 1
+      # User timers stop at logout unless the user lingers.
+      if command -v loginctl >/dev/null 2>&1 && [[ "$(loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null || true)" != "yes" ]]; then
+        echo "⚠ Linger     run: loginctl enable-linger $(id -un)  (otherwise loops stop when you log out)"
+      fi ;;
+    cron) check_binary crontab crontab ;;
+    foreground) echo "✓ Scheduler  foreground: run \`npm run loops\` (scripts/agent-loops/scheduler.js)" ;;
+  esac
+}
+
 check() {
   local failed=0 agent
-  echo "Project Admin agent-loop readiness"
+  echo "Project Admin agent-loop readiness ($SCHEDULER on $(uname -s))"
   check_binary Node node || failed=1
   while read -r agent; do
     [[ -n "$agent" ]] || continue
     check_agent "$agent" || failed=1
   done < <(node "$SCRIPT_DIR/roster-check.js" --agents "$MACHINE_ID" | tr ',' '\n')
   check_binary timeout timeout || check_binary gtimeout gtimeout || failed=1
+  check_scheduler || failed=1
   [[ -x "$SCRIPT_DIR/loop-wrapper.sh" ]] && echo "✓ Wrapper    loop-wrapper.sh is executable" || { echo "✗ Wrapper    scripts/agent-loops/loop-wrapper.sh missing or not executable"; failed=1; }
-  command -v taskpolicy >/dev/null 2>&1 && echo "✓ taskpolicy loops re-exec at normal QoS" || echo "⚠ taskpolicy missing — loops stay pinned to the E-cores"
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    command -v taskpolicy >/dev/null 2>&1 && echo "✓ taskpolicy loops re-exec at normal QoS" || echo "⚠ taskpolicy missing — loops stay pinned to the E-cores"
+  fi
   if gcloud auth application-default print-access-token >/dev/null 2>&1; then
     echo "✓ Firestore  application-default credentials ready"
   else
@@ -63,26 +101,9 @@ check() {
   return "$failed"
 }
 
-plist() {
-  local label="$1" agent="$2" queue="$3" interval="$4"
-  local path="$LAUNCH_DIR/$1.plist" temp_path
-  temp_path="$(mktemp)"
-  sed -e "s|__LABEL__|$label|g" -e "s|__REPO__|$REPO_ROOT|g" -e "s|__AGENT__|$agent|g" -e "s|__QUEUE__|$queue|g" -e "s|__INTERVAL__|$interval|g" -e "s|__LOGDIR__|$LOG_DIR|g" -e "s|__MACHINE__|$MACHINE_ID|g" -e "s|__PATH__|$PATH|g" "$SCRIPT_DIR/launchd.plist.template" > "$temp_path"
-  install -m 0644 "$temp_path" "$path"
-  rm "$temp_path"
-  launchctl bootout "gui/$(id -u)/$label" >/dev/null 2>&1 || true
-  launchctl bootstrap "gui/$(id -u)" "$path"
-  echo "Installed $label ($agent $queue every ${interval}s)"
-}
+# --- launchd -----------------------------------------------------------------
 
-# Poll cadence is per agent (`pollSeconds` in the roster, default 300).
-interval_for() {
-  node "$AGENTS_HELPER" get "$1" pollSeconds
-}
-
-install_jobs() {
-  mkdir -p "$LAUNCH_DIR" "$LOG_DIR"
-  check
+launchd_uninstall() {
   local file label
   for file in "$LAUNCH_DIR"/com.projectadmin.loop.*.plist; do
     [[ -e "$file" ]] || continue
@@ -90,42 +111,165 @@ install_jobs() {
     launchctl bootout "gui/$(id -u)/$label" >/dev/null 2>&1 || true
     rm "$file"
   done
-  local queue agent installed=0 deploy_installed=0
-  # machine-roster.json is the only place that says which agent x queue loops
-  # this host runs, so enumerate it instead of repeating the roster here.
-  while read -r queue agent; do
-    [[ -n "$queue" && -n "$agent" ]] || continue
-    if [[ "$queue" == "deploy" ]]; then
-      # The dashboard picks the deploy model at poll time, so every deploy
-      # entitlement collapses into the one `configured` dispatcher.
-      if (( deploy_installed )); then continue; fi
-      plist com.projectadmin.loop.configured-deploy configured deploy 900
-      deploy_installed=1
-    else
-      plist "com.projectadmin.loop.$agent-$queue" "$agent" "$queue" "$(interval_for "$agent")"
-    fi
-    installed=$((installed + 1))
-  done < <(node "$SCRIPT_DIR/roster-check.js" --list "$MACHINE_ID")
-  (( installed )) || { echo "machine-roster.json entitles $MACHINE_ID to nothing" >&2; return 1; }
-  # The bootout above ended every running loop's process tree. Hand their items
-  # back now rather than waiting out four-hour leases. RunAtLoad covers the case
-  # where this script was itself booted out mid-install: each job just
-  # bootstrapped fires immediately and sweeps before it counts work.
-  node "$SCRIPT_DIR/log-run.js" reap --machine "$MACHINE_ID" --stale-minutes 0 || true
-  echo "$installed Project Admin loop jobs are loaded for $MACHINE_ID. Item owners select build models; the dashboard selects the shared deploy model."
-  echo "Each job runs loop-wrapper.sh, which works in its own .agent-worktrees/loop-<queue>-<agent> checkout, never the primary one."
 }
 
-status() {
-  launchctl print-disabled "gui/$(id -u)" | rg 'com\.projectadmin\.loop' || true
+launchd_install() {
+  local rendered="$1" file label
+  mkdir -p "$LAUNCH_DIR"
+  launchd_uninstall
+  for file in "$rendered"/*.plist; do
+    label="$(basename "$file" .plist)"
+    install -m 0644 "$file" "$LAUNCH_DIR/$label.plist"
+    launchctl bootout "gui/$(id -u)/$label" >/dev/null 2>&1 || true
+    launchctl bootstrap "gui/$(id -u)" "$LAUNCH_DIR/$label.plist"
+    echo "Installed $label"
+  done
+}
+
+launchd_status() {
+  launchctl print-disabled "gui/$(id -u)" | grep 'com\.projectadmin\.loop' || true
+  local file
   for file in "$LAUNCH_DIR"/com.projectadmin.loop.*.plist; do
     [[ -e "$file" ]] && basename "$file"
   done
+  return 0
+}
+
+# --- systemd (user units) ----------------------------------------------------
+
+systemd_uninstall() {
+  local file
+  for file in "$SYSTEMD_DIR"/projectadmin-loop-*.timer; do
+    [[ -e "$file" ]] || continue
+    systemctl --user disable --now "$(basename "$file")" >/dev/null 2>&1 || true
+  done
+  rm -f "$SYSTEMD_DIR"/projectadmin-loop-*.timer "$SYSTEMD_DIR"/projectadmin-loop-*.service
+  systemctl --user daemon-reload
+}
+
+systemd_install() {
+  local rendered="$1" file
+  mkdir -p "$SYSTEMD_DIR"
+  systemd_uninstall
+  install -m 0644 "$rendered"/*.service "$rendered"/*.timer "$SYSTEMD_DIR"/
+  systemctl --user daemon-reload
+  for file in "$rendered"/*.timer; do
+    systemctl --user enable --now "$(basename "$file")"
+    echo "Installed $(basename "$file" .timer)"
+  done
+}
+
+systemd_status() {
+  systemctl --user list-timers 'projectadmin-loop-*' --all --no-pager || true
+}
+
+# --- cron --------------------------------------------------------------------
+
+# `crontab -l` exits 1 when the user has no crontab yet; that is an empty one.
+current_crontab() {
+  crontab -l 2>/dev/null || true
+}
+
+cron_install() {
+  local merged
+  merged="$(current_crontab | node "$UNITS" crontab-merge)"
+  printf '%s\n' "$merged" | crontab -
+  echo "Installed $(printf '%s\n' "$merged" | grep -c 'loop-wrapper\.sh') cron entries"
+}
+
+# Read the whole crontab before writing it back; never pipe `crontab -l` into
+# `crontab -` in one pipeline.
+cron_uninstall() {
+  local stripped
+  stripped="$(current_crontab | node "$UNITS" crontab-strip)"
+  printf '%s\n' "$stripped" | crontab -
+}
+
+cron_status() {
+  current_crontab | sed -n '/^# BEGIN project-admin agent loops/,/^# END project-admin agent loops/p'
+}
+
+# --- foreground --------------------------------------------------------------
+
+foreground_note() {
+  echo "automation.scheduler is foreground: nothing is installed. Run \`npm run loops\`"
+  echo "(scripts/agent-loops/scheduler.js) in a terminal, tmux, a container, or a CI job."
+}
+
+# --- actions -----------------------------------------------------------------
+
+dry_run() {
+  local rendered file
+  echo "# Dry run: $SCHEDULER jobs for $MACHINE_ID (nothing is installed)"
+  case "$SCHEDULER" in
+    cron) node "$UNITS" render cron ;;
+    foreground) foreground_note; node "$UNITS" jobs ;;
+    *)
+      rendered="$(mktemp -d)"
+      node "$UNITS" render "$SCHEDULER" "$rendered"
+      for file in "$rendered"/*; do
+        echo "# ---- $(basename "$file")"
+        cat "$file"
+      done
+      rm -rf "$rendered" ;;
+  esac
+}
+
+install_jobs() {
+  if [[ "$OPTION" == "--dry-run" ]]; then dry_run; return 0; fi
+  local installed rendered
+  installed="$(node "$UNITS" jobs | wc -l | tr -d ' ')"
+  (( installed )) || { echo "machine-roster.json entitles $MACHINE_ID to nothing" >&2; return 1; }
+  if [[ -z "$OFFLINE" ]]; then
+    check || { echo "Fix the ✗ items above, then rerun install." >&2; return 1; }
+  fi
+  mkdir -p "$LOG_DIR"
+  # The machine roster is the only place that says which agent x queue loops
+  # this host runs; schedulers/index.js enumerates it, one job per entitlement.
+  rendered="$(mktemp -d)"
+  case "$SCHEDULER" in
+    launchd|systemd) node "$UNITS" render "$SCHEDULER" "$rendered" ;;
+  esac
+  case "$SCHEDULER" in
+    launchd) launchd_install "$rendered" ;;
+    systemd) systemd_install "$rendered" ;;
+    cron) cron_install ;;
+    foreground) foreground_note; rm -rf "$rendered"; return 0 ;;
+  esac
+  rm -rf "$rendered"
+  # Reinstalling ended every running loop's process tree (launchctl bootout,
+  # systemctl stop). Hand their items back now rather than waiting out four-hour
+  # leases. launchd's RunAtLoad and the timers' OnActiveSec also make each job
+  # fire within seconds and sweep before it counts work, which covers the case
+  # where this script was itself ended mid-install.
+  [[ -n "$OFFLINE" ]] || node "$SCRIPT_DIR/log-run.js" reap --machine "$MACHINE_ID" --stale-minutes 0 || true
+  echo "$installed Project Admin loop jobs are scheduled with $SCHEDULER for $MACHINE_ID. Item owners select build models; the dashboard selects the shared deploy model."
+  echo "Each job runs loop-wrapper.sh, which works in its own .agent-worktrees/loop-<queue>-<agent> checkout, never the primary one. Logs: $LOG_DIR"
+}
+
+status() {
+  case "$SCHEDULER" in
+    launchd) launchd_status ;;
+    systemd) systemd_status ;;
+    cron) cron_status ;;
+    foreground) foreground_note ;;
+  esac
+}
+
+uninstall_jobs() {
+  case "$SCHEDULER" in
+    launchd) launchd_uninstall ;;
+    systemd) systemd_uninstall ;;
+    cron) cron_uninstall ;;
+    foreground) foreground_note; return 0 ;;
+  esac
+  echo "Removed every Project Admin loop job from $SCHEDULER."
 }
 
 case "$ACTION" in
   check) check ;;
   install) install_jobs ;;
   status) status ;;
-  *) echo "Usage: $0 <check|install|status>" >&2; exit 2 ;;
+  uninstall) uninstall_jobs ;;
+  *) echo "Usage: $0 <check|install [--dry-run]|status|uninstall>" >&2; exit 2 ;;
 esac

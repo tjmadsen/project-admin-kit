@@ -3,8 +3,9 @@
 ## Prerequisites
 
 Install Node 20, Java 21, the Firebase CLI, Google Cloud CLI, Git, and GitHub CLI.
-macOS loop runners also need Homebrew coreutils (`gtimeout`) and at least one
-supported agent CLI. Xcode, Flutter, and XcodeGen are needed only for the
+Loop runners need GNU coreutils (`brew install coreutils` on macOS for
+`gtimeout`; Linux distributions ship `timeout`) and at least one supported
+agent CLI. Xcode, Flutter, and XcodeGen are needed only for the
 optional mobile release paths.
 
 ## 1. Create Firebase resources
@@ -58,10 +59,14 @@ key entirely to get only the built-in feature + bug pair.
 
 Install the CLIs your configured `agents` use (Codex, Claude, and Grok by
 default; any other CLI through the `command` runner, see
-`scripts/agent-loops/runners/README.md`) on a macOS runner. Update the enforcing
+`scripts/agent-loops/runners/README.md`) on a runner host. Update the enforcing
 machine roster to include only the models and queues that host may run. Run the
-provisioner check, then install its launchd jobs. The Agent Loops page will show
-the first heartbeat and subsequent run history.
+provisioner check, then install its jobs: launchd on macOS and systemd user
+timers on Linux by default, or set `automation.scheduler` to `cron` or
+`foreground` (`npm run loops`, also the entry point of `Dockerfile.loops`). See
+`scripts/agent-loops/README.md` for each scheduler, containers, and the
+`notifications` block (desktop and Slack/ntfy/JSON webhooks). The Agent Loops
+page will show the first heartbeat and subsequent run history.
 
 Add each scheduled kind to that host's `queues` in the machine roster; the valid
 queue names are printed by `node scripts/lib/work-kinds.js queues`.
@@ -105,8 +110,8 @@ Earlier releases stored each kind in its own collection. All kinds now live in
 one `workItems` collection with a `kind` field. Counter fields are unchanged
 (`nextFeatureNumber`, `nextBugNumber`), so numbering continues.
 
-1. Pause the loops (`scripts/agent-loops/provision-machine.sh status`, then
-   unload the launchd jobs) so nothing writes the legacy collections mid-copy.
+1. Pause the loops (`scripts/agent-loops/provision-machine.sh uninstall`, or
+   stop `npm run loops`) so nothing writes the legacy collections mid-copy.
 2. Preview the copy, then apply it with Application Default Credentials:
 
    ```bash
@@ -124,5 +129,5 @@ one `workItems` collection with a `kind` field. Counter fields are unchanged
    and delete the old triggers:
    `firebase functions:delete notifyFeatureLifecycle notifyBugLifecycle`.
    Migrated copies carry `migratedFrom`, so they do not send notifications.
-5. Reload the loops. Once you are satisfied, delete the legacy collections from
+5. Reload the loops (`provision-machine.sh install`). Once you are satisfied, delete the legacy collections from
    the Firebase console.

@@ -19,7 +19,9 @@ top-level `agents` array in that file; without one, the built-in roster in
 `agentAliases` maps shorthand tokens (`codex` → `terra`, `claude` → `sonnet`).
 Opus (`claimsUnassigned: true`) also sweeps unassigned work. Every other model
 claims only explicitly owned items. All agents respect `targetMachine`; this
-installation uses `local-mac`.
+installation uses `local-mac`. A host's machine id is `PROJECT_ADMIN_MACHINE_ID`
+when set (every scheduler sets it), else the `machine-roster.json` entry whose
+optional `hostnames` list names this host, else `automation.defaultMachineId`.
 
 Each entry is `{ token, label, short?, emoji?, runner, model,
 claimsUnassigned?, pollSeconds?, sandbox?, usage? }` (plus `command` and
@@ -38,7 +40,7 @@ flagged when the loop starts and on the Agent Loops page.
 
 ## Run once
 
-Scheduled fires go through the wrapper, which is what `launchd` invokes:
+Scheduled fires go through the wrapper, which is what every scheduler invokes:
 
 ```bash
 scripts/agent-loops/loop-wrapper.sh terra feature
@@ -46,8 +48,10 @@ scripts/agent-loops/loop-wrapper.sh sonnet bug
 scripts/agent-loops/loop-wrapper.sh configured deploy
 ```
 
-The wrapper re-execs once under `taskpolicy -a` (so `ProcessType=Background`
-cannot pin the whole process tree to the E-cores), holds a single-instance lock
+On macOS the wrapper re-execs once under `taskpolicy -a` (so
+`ProcessType=Background` cannot pin the whole process tree to the E-cores). It
+sources the optional `~/<stateDirectory>/loops.env` (for per-host secrets such
+as a webhook URL or a container's CLI API keys), holds a single-instance lock
 per `(queue,token)` under `~/.project-admin`, refreshes a dedicated
 `.agent-worktrees/loop-<queue>-<token>` checkout to the configured default branch, links the
 gitignored `node_modules` installs, and runs that checkout's `run-loop.sh`. No
@@ -80,8 +84,9 @@ recorded as failed and its claim is released immediately. Any isolated worktree
 is preserved for the next same-model pass to resume.
 
 A run that ends by signal never reaches that path at all. `launchctl bootout`
-ends a job's whole process tree, and `provision-machine.sh install` runs it over
-every loop label including the one issuing the command, so the row stays
+(or `systemctl stop`, or the foreground scheduler's SIGTERM) ends a job's whole
+process tree, and `provision-machine.sh install` does that to every loop job
+including the one issuing the command, so the row stays
 `running` with a frozen heartbeat and its item stays claimed until the
 four-hour lease lapses. `log-run.js start` therefore records the runner pid, and
 every iteration sweeps before it counts work:
@@ -96,13 +101,14 @@ duration frozen at the last heartbeat, and releases the item it claimed. A
 paused or sleeping Mac keeps its runner pid, so heartbeat age alone never costs
 a live run its claim; rows written before pids were recorded are reported and
 left alone. `install` sweeps after re-bootstrapping, and because every plist
-sets `RunAtLoad`, the jobs it just ended sweep themselves within seconds even
-when the install killed its own caller.
+sets `RunAtLoad` (and every timer `OnActiveSec`), the jobs it just ended sweep
+themselves within seconds even when the install killed its own caller.
 
 A run that dies on an expired or broken CLI session is recorded as exit 78 with
 an explicit authentication reason, so the Agent Loops page shows it instead of
-an apparently idle queue. the project owner gets one macOS notification per thirty minutes
-across every loop, debounced through a shared stamp in `~/.project-admin`.
+an apparently idle queue. The project owner gets one alert per thirty minutes
+across every loop, debounced through a shared stamp in `~/.project-admin` and
+sent through `notify.js` (see [Notifications](#notifications)).
 
 Every poll also refreshes shared seven-day provider usage for the Agent Loops
 dashboard through the agent's usage hook. Codex reads the newest local session
@@ -129,29 +135,138 @@ package's lockfile differs, and resolves the Flutter package. It is idempotent,
 so run it again when resuming a recorded branch; `--dry-run` prints the plan
 without changing anything, and it refuses to target the shared primary checkout.
 
-## Provision a macOS runner
+## Provision a runner
 
 ```bash
 cd scripts && npm install && cd ..
 scripts/agent-loops/provision-machine.sh check
+scripts/agent-loops/provision-machine.sh install --dry-run   # preview the units
 scripts/agent-loops/provision-machine.sh install
 scripts/agent-loops/provision-machine.sh status
+scripts/agent-loops/provision-machine.sh uninstall
 ```
+
+`automation.scheduler` in `project-admin.config.json` picks how jobs run
+(`PROJECT_ADMIN_SCHEDULER` overrides it for one command). Every scheduler gets
+the same job set from `schedulers/index.js`, with templates beside it:
+
+| Scheduler | Default on | What `install` does | Logs |
+|---|---|---|---|
+| `launchd` | macOS | one `~/Library/LaunchAgents/com.projectadmin.loop.<agent>-<queue>.plist` per job, `RunAtLoad`, `StartInterval` | `~/Library/Logs/ProjectAdminAgentLoops` |
+| `systemd` | Linux | one user `projectadmin-loop-<agent>-<queue>.service` (oneshot) + `.timer` (`OnActiveSec` staggered, `OnUnitActiveSec` = interval) in `~/.config/systemd/user`, then `enable --now` | `~/.local/state/ProjectAdminAgentLoops` |
+| `cron` | — | one marked `# BEGIN/END project-admin agent loops` block in your crontab, replaced in place on every install; other lines are untouched | same as systemd |
+| `foreground` | other platforms | nothing; run `npm run loops` (below) | same as systemd |
+
+`install` removes the previous loop jobs first, so it is idempotent and drops
+jobs the roster no longer entitles. User systemd timers stop at logout unless
+you run `loginctl enable-linger $USER` (the `check` warns). cron is
+minute-granular: sub-hour intervals that divide the hour are offset per job
+(`2-59/5`), others round to `*/N`, and nothing fires at install time until the
+first matching minute. `PROJECT_ADMIN_LOOP_LOG_DIR` overrides the log
+directory. Per-run transcripts always go to the repo's ignored `.agent-logs/`.
 
 `machine-roster.json` is the single source of truth for which host may run which
 agent x queue loop, and `roster-check.js` makes it enforcing: `run-loop.sh`
-exits 2 on any triple the roster omits, so a hand-copied or stale plist cannot
+exits 2 on any triple the roster omits, so a hand-copied or stale unit cannot
 poll a queue this machine is no longer entitled to run. `install` enumerates the
-same roster (`roster-check.js --list <machine>`) rather than repeating it, which
-in the sample roster is feature and bug pollers for all seven selectable models
-plus one deploy dispatcher. Roster entries for tokens the config no longer
-defines entitle nothing. `check` asks each entitled agent's runner adapter to
-locate its CLI and flags unguarded agents. The dispatcher reads `system/agentLoopConfig` so a
+same roster rather than repeating it, which in the sample roster is feature,
+bug, and task pollers for all seven selectable models plus one deploy
+dispatcher. Roster entries for tokens the config no longer defines entitle
+nothing. `check` asks each entitled agent's runner adapter to locate its CLI and
+flags unguarded agents. The dispatcher reads `system/agentLoopConfig` so a
 dashboard model change takes effect on its next poll. Empty queues are cheap
-no-ops. Feature and bug pollers fire every agent's `pollSeconds` (five minutes
-by default, thirty for Grok), and the deploy dispatcher every fifteen minutes. Logs go
-to `~/Library/Logs/ProjectAdminAgentLoops`; per-run transcripts go to the repo's
-ignored `.agent-logs/` directory.
+no-ops. Build pollers fire every agent's `pollSeconds` (five minutes by
+default, thirty for Grok), and the deploy dispatcher every fifteen minutes.
+
+On Linux the loops need GNU coreutils `timeout`; `run-loop.sh` puts a
+`gtimeout` alias on the agent's PATH because the runbooks use Homebrew's name.
+TestFlight releases (`launch-testflight.sh`) remain macOS-only.
+
+## Run loops in the foreground
+
+```bash
+npm run loops                                  # every entitled loop, until Ctrl-C
+npm run loops -- --dry-run                     # the job table
+npm run loops -- --once                        # each loop once (CI smoke), exit 1 on failure
+npm run loops -- --only sol-feature,configured-deploy --stagger 10
+```
+
+`scheduler.js` is the portable scheduler for Docker, CI, a dev shell, tmux, or
+Windows through WSL. It runs the same job set through `loop-wrapper.sh`, starts
+jobs `--stagger` seconds apart (default 5), and starts each job's next run one
+interval after the previous run started (immediately if it ran longer), never
+overlapping a job with itself. Each job holds `~/<stateDirectory>/scheduler/<id>.lock`
+while the scheduler runs, so two schedulers on one host never drive the same
+loop; a lock whose pid is gone is taken over. SIGINT/SIGTERM stops scheduling,
+sends SIGTERM to every running job's process group, escalates to SIGKILL after
+`--grace` seconds (default 30), and releases the locks; a second signal kills at
+once. Output goes to the same per-job log files as the other schedulers.
+
+## Run loops in a container
+
+`Dockerfile.loops` is a minimal starting point: Node 20, git, coreutils, the
+Claude and Codex CLIs (`--build-arg AGENT_CLIS=...` to change), and
+`scheduler.js` as the entry point. Mount the checkout rather than copying it,
+add the container to the roster, and pass CLI and Google credentials in:
+
+```json
+{ "id": "container", "label": "Loop container", "agents": ["sonnet", "terra"], "queues": ["feature", "bug", "deploy"] }
+```
+
+```bash
+docker build -f Dockerfile.loops -t project-admin-loops .
+docker run -d --name project-admin-loops \
+  -v "$PWD:/repo" \
+  -v "$HOME/.config/gcloud:/home/node/.config/gcloud:ro" \
+  -v "$HOME/.codex:/home/node/.codex" \
+  -v "$HOME/.config/gh:/home/node/.config/gh:ro" \
+  -e ANTHROPIC_API_KEY -e PROJECT_ADMIN_NOTIFY_WEBHOOK_URL \
+  project-admin-loops
+docker logs -f project-admin-loops
+```
+
+The image sets `PROJECT_ADMIN_MACHINE_ID=container`; change it per container.
+Claude Code accepts `ANTHROPIC_API_KEY` (or a mounted `~/.claude`), Codex reads
+`~/.codex/auth.json`, the backlog CLIs use Application Default Credentials from
+the mounted gcloud directory, and `gh` handles PRs. Logs land under
+`/home/node/.local/state` inside the container; mount a volume there to keep
+them. `docker stop` sends SIGTERM, which the scheduler handles as above.
+
+## Notifications
+
+Loop alerts go through `notify.js`, configured by `notifications`:
+
+```json
+"notifications": {
+  "desktop": true,
+  "webhook": { "urlEnv": "PROJECT_ADMIN_NOTIFY_WEBHOOK_URL", "format": "json" }
+}
+```
+
+- `desktop` (default `true`): `osascript` on macOS, `notify-send` on Linux when
+  installed, otherwise skipped.
+- `webhook`: POSTs to the URL in the named environment variable (default
+  `PROJECT_ADMIN_NOTIFY_WEBHOOK_URL`); nothing is sent while it is unset. Keep the
+  URL out of config and unit files: put it in `~/<stateDirectory>/loops.env`,
+  which the wrapper sources. `format` is `json` (`{title, message, level}`, for
+  your own receiver), `slack`, or `ntfy`.
+
+```bash
+# ~/.project-admin/loops.env
+PROJECT_ADMIN_NOTIFY_WEBHOOK_URL=https://hooks.slack.com/services/T000/B000/XXXX  # format: "slack"
+# PROJECT_ADMIN_NOTIFY_WEBHOOK_URL=https://ntfy.sh/my-private-loop-topic         # format: "ntfy"
+```
+
+For Slack, create an incoming webhook for a channel; for ntfy, subscribe to a
+hard-to-guess topic in the ntfy app (or your own server). Test the channels with:
+
+```bash
+node scripts/agent-loops/notify.js --level warning --title "Loop test" --message "Hello from $(hostname)"
+```
+
+A channel failure is printed but never fails a loop. `PROJECT_ADMIN_LOOP_NOTIFIER`
+replaces `notify.js` with any command that takes the same `--title`,
+`--message`, and `--level` arguments.
 
 ## Backlog CLI
 

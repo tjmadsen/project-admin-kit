@@ -23,8 +23,11 @@ Run every suite a change touches.
 The rules suite needs both emulators. A fresh worktree has no `auth.env` or
 `node_modules`; immediately run
 `scripts/agent-loops/provision-worktree.sh <worktree-path>` after creating it.
-Node/model CLIs may be installed outside launchd's default PATH. Use
-`/usr/sbin/scutil` by absolute path when detecting a macOS host.
+Node/model CLIs may be installed outside a scheduler's default PATH (launchd,
+systemd, and cron all start jobs with a minimal one). Use `/usr/sbin/scutil` by
+absolute path when detecting a macOS host, and guard macOS-only tools
+(`taskpolicy`, `osascript`, `launchctl`) behind a Darwin check; loops also run
+on Linux.
 
 ## Working disposition
 

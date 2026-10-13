@@ -1,0 +1,6 @@
+# BEGIN project-admin agent loops (managed by provision-machine.sh; edits are replaced)
+# repo: /srv/my app machine: ci-box
+0-59/5 * * * * PATH='/usr/local/bin:/usr/bin:/bin' PROJECT_ADMIN_MACHINE_ID='ci-box' '/srv/my app/scripts/agent-loops/loop-wrapper.sh' sol feature >>'/var/log/pa loops/sol-feature.log' 2>>'/var/log/pa loops/sol-feature.error.log'
+1-59/30 * * * * PATH='/usr/local/bin:/usr/bin:/bin' PROJECT_ADMIN_MACHINE_ID='ci-box' '/srv/my app/scripts/agent-loops/loop-wrapper.sh' grok feature >>'/var/log/pa loops/grok-feature.log' 2>>'/var/log/pa loops/grok-feature.error.log'
+2-59/15 * * * * PATH='/usr/local/bin:/usr/bin:/bin' PROJECT_ADMIN_MACHINE_ID='ci-box' '/srv/my app/scripts/agent-loops/loop-wrapper.sh' configured deploy >>'/var/log/pa loops/configured-deploy.log' 2>>'/var/log/pa loops/configured-deploy.error.log'
+# END project-admin agent loops

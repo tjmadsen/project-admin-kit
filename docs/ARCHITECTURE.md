@@ -105,7 +105,9 @@ prints the equivalent `targets` map with each `false` carried over as
 
 ## Loop isolation and recovery
 
-Scheduled polls run from dedicated clean worktrees. Actual work-item work gets
+Scheduled polls (launchd, systemd user timers, cron, or the portable
+`scheduler.js`, all generated from the same machine-roster job set) run from
+dedicated clean worktrees. Actual work-item work gets
 another durable branch-backed worktree. Heartbeats and progress snapshots feed
 the dashboard. A reaper detects dead runner PIDs, freezes run duration, returns
 the exact claim to its queue, and preserves the implementation worktree.
