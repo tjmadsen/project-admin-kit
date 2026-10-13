@@ -1,18 +1,19 @@
 #!/usr/bin/env node
 'use strict';
 
-const { loadProjectConfig } = require('./lib/project-config');
+const { loadProjectConfig, resolveBackend } = require('./lib/project-config');
 
 const config = loadProjectConfig();
 const values = {
   PROJECT_NAME: config.project.name,
   PROJECT_SLUG: config.project.slug,
-  PROJECT_ID: config.project.firebaseProjectId,
+  PROJECT_ID: config.project.firebaseProjectId || '',
   PRODUCTION_URL: config.project.productionUrl.replace(/\/$/, ''),
   VERCEL_PRODUCTION_URL: (config.project.vercelProductionUrl || config.project.productionUrl).replace(/\/$/, ''),
   ADMIN_PATH: config.project.adminPath,
   ADMIN_BASE_URL: `${config.project.productionUrl.replace(/\/$/, '')}${config.project.adminPath}`,
-  STORAGE_BUCKET: config.firebase.storageBucket,
+  STORAGE_BUCKET: config.firebase?.storageBucket || '',
+  BACKEND: resolveBackend(config).type,
   REPOSITORY_SLUG: config.repository.slug,
   DEFAULT_BRANCH: config.repository.defaultBranch,
   DEFAULT_MACHINE_ID: config.automation.defaultMachineId,

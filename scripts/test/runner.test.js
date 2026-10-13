@@ -14,6 +14,7 @@ const {
 } = require('../agent-loops/confirmation-handoff');
 const { claimBelongsToRun, collectionForRun } = require('../agent-loops/run-claims');
 const { reapAbandonedRuns } = require('../agent-loops/reap-runs');
+const { createFirestoreStore } = require('../lib/store/firestore-store');
 
 function fakeDatabase(run, item) {
   const updates = [];
@@ -54,12 +55,14 @@ function withRunSnapshot(database) {
 }
 
 const handoffDependencies = (database) => ({
-  database,
-  fieldValue: {
-    serverTimestamp: () => 'server-timestamp',
-    arrayUnion: (value) => ({ arrayUnion: value }),
-  },
-  timestamp: { now: () => 'timestamp-now' },
+  store: createFirestoreStore({
+    db: database,
+    FieldValue: {
+      serverTimestamp: () => 'server-timestamp',
+      arrayUnion: (value) => ({ arrayUnion: value }),
+    },
+    Timestamp: { now: () => 'timestamp-now' },
+  }),
   agentLabelFor: (token) => `Agent ${token}`,
 });
 
@@ -200,8 +203,7 @@ function fakeRunsDatabase(runs) {
 }
 
 const reapDependencies = (database, overrides = {}) => ({
-  database,
-  timestamp: { fromMillis: (millis) => ({ millis }) },
+  store: createFirestoreStore({ db: database, Timestamp: { fromMillis: (millis) => ({ millis }) } }),
   machineId: 'local-mac',
   now: Date.parse('2026-09-04T05:00:00Z'),
   isProcessAlive: (pid) => pid === 4242,

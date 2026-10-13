@@ -19,6 +19,7 @@ const {
   unmetDependencyIds,
 } = require('./dependencies');
 const { loadProjectConfig } = require('./project-config');
+const { createFirestoreStore } = require('./store/firestore-store');
 const { WORK_ITEMS_COLLECTION, itemReference, loadWorkKinds, requireKind } = require('./work-kinds');
 
 const PRIORITY = { critical: 0, high: 1, medium: 2, low: 3 };
@@ -75,11 +76,14 @@ function requireMeaningfulFlag(flags, name) {
 }
 function agentFrom(flags) { return resolveAgent(requireFlag(flags, 'as')); }
 
-// Builds the backlog CLI around injected services so tests can drive every
-// command against an in-memory Firestore. `kindId` scopes the CLI to one kind
-// (the feature/bug shims, --kind, or PROJECT_ADMIN_WORK_KIND); without it,
-// item-scoped commands use the kind recorded on the document.
+// Builds the backlog CLI around an injected BacklogStore (lib/store) so tests
+// drive every command against any backend. Passing `db`/`FieldValue`/`Timestamp`
+// instead wraps that Firestore (real or fake) in the Firestore store.
+// `kindId` scopes the CLI to one kind (the feature/bug shims, --kind, or
+// PROJECT_ADMIN_WORK_KIND); without it, item-scoped commands use the kind
+// recorded on the document.
 function createBacklogAgent({
+  store = null,
   db,
   FieldValue,
   Timestamp,
@@ -87,13 +91,15 @@ function createBacklogAgent({
   kinds = loadWorkKinds(config),
   kindId = null,
   env = process.env,
-  uploadAttachments = require('./attachments').uploadAttachments,
+  uploadAttachments = null,
   log = (line) => console.log(line),
 }) {
   const scopedKind = kindId ? requireKind(kinds, kindId) : null;
+  store ||= createFirestoreStore({ db, FieldValue, Timestamp });
+  const upload = uploadAttachments || ((paths, target) => store.attachments.upload(paths, target));
   const MACHINE_ID = env.PROJECT_ADMIN_MACHINE_ID || config.automation.defaultMachineId;
   const OWNER_NAME = config.admin.ownerName;
-  const items = () => db.collection(WORK_ITEMS_COLLECTION);
+  const serverTimestamp = () => store.serverTimestamp();
 
   function json(value) {
     log(JSON.stringify(value, (_key, current) => {
@@ -103,7 +109,7 @@ function createBacklogAgent({
   }
   function machineEligible(data) { return !data.targetMachine || data.targetMachine === 'any' || data.targetMachine === MACHINE_ID; }
   function message(author, body, imageUrls = []) {
-    const entry = { author, body, createdAt: Timestamp.now() };
+    const entry = { author, body, createdAt: store.now() };
     if (imageUrls.length > 0) entry.imageUrls = imageUrls;
     return entry;
   }
@@ -125,41 +131,34 @@ function createBacklogAgent({
   }
   async function loadItem(id) {
     if (!id) throw new Error('Missing item id');
-    const ref = items().doc(id);
-    const snapshot = await ref.get();
-    if (!snapshot.exists) throw new Error(`${id} not found`);
-    const data = snapshot.data();
-    return { ref, data, kind: kindOf(id, data) };
+    const data = await store.items.get(id);
+    if (!data) throw new Error(`${id} not found`);
+    return { data, kind: kindOf(id, data) };
   }
 
-  function dependencyDocumentRefs(list) {
-    return [...new Set(list.flatMap(dependencyIds))].map((id) => items().doc(id));
-  }
-  function workItemsFromSnapshots(snapshots) {
-    return snapshots
-      .filter((snapshot) => snapshot.exists)
-      .map((snapshot) => ({ id: snapshot.id, ...snapshot.data() }));
+  function dependencyIdsOf(list) {
+    return [...new Set(list.flatMap(dependencyIds))];
   }
   async function dependencyIndexFor(list) {
-    const refs = dependencyDocumentRefs(list);
-    if (refs.length === 0) return new Map();
-    return indexWorkItems(workItemsFromSnapshots(await db.getAll(...refs)));
+    const ids = dependencyIdsOf(list);
+    if (ids.length === 0) return new Map();
+    return indexWorkItems(await store.items.getMany(ids));
   }
-  async function dependenciesSatisfiedInTransaction(transaction, item) {
-    const refs = dependencyDocumentRefs([item]);
-    if (refs.length === 0) return true;
-    const itemsById = indexWorkItems(workItemsFromSnapshots(await transaction.getAll(...refs)));
+  async function dependenciesSatisfiedInTransaction(tx, item) {
+    const ids = dependencyIdsOf([item]);
+    if (ids.length === 0) return true;
+    const itemsById = indexWorkItems(await tx.getMany(ids));
     return unmetDependencyIds(item, itemsById, kinds).length === 0;
   }
 
   async function attachRun(item) {
     const runId = env.PROJECT_ADMIN_AGENT_RUN_ID;
     if (!runId) return;
-    await db.collection('agentLoopRuns').doc(runId).set({
+    await store.runs.merge(runId, {
       activeItem: itemReference(kinds, item), activeItemId: item.id,
       activeCollection: WORK_ITEMS_COLLECTION,
-      heartbeatAt: FieldValue.serverTimestamp(),
-    }, { merge: true });
+      heartbeatAt: serverTimestamp(),
+    });
   }
 
   async function create(flags) {
@@ -167,25 +166,17 @@ function createBacklogAgent({
     const agent = agentFrom(flags);
     const title = requireFlag(flags, 'title');
     const description = requireFlag(flags, 'description');
-    const ref = items().doc();
-    const number = await db.runTransaction(async (transaction) => {
-      const counterRef = db.collection('system').doc('counters');
-      const counter = await transaction.get(counterRef);
-      const nextNumber = Number(counter.data()?.[kind.counterField] ?? 0) + 1;
-      transaction.set(counterRef, { [kind.counterField]: nextNumber, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-      transaction.set(ref, {
-        kind: kind.id, number: nextNumber, title, description,
-        priority: flags.priority || 'medium', status: kind.statuses.initial,
-        waitingOn: flags.waiting || 'agent', assignedTo: flags.owner ? resolveAgent(flags.owner).owner : resolveAgent(config.automation.defaultWorkAgent).owner,
-        blockedReason: flags.waiting === 'human' ? 'triage' : null,
-        thinkingEffort: flags.effort || 'xhigh', targetMachine: flags.machine || MACHINE_ID,
-        deploymentTargets: [], deploymentType: 'none',
-        messages: [message(agent.label, `Created ${kind.prefix}-${nextNumber}.`)],
-        createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
-      });
-      return nextNumber;
-    });
-    json({ id: ref.id, number, ref: `${kind.prefix}-${number}` });
+    const { id, number } = await store.items.create(kind, (nextNumber) => ({
+      kind: kind.id, number: nextNumber, title, description,
+      priority: flags.priority || 'medium', status: kind.statuses.initial,
+      waitingOn: flags.waiting || 'agent', assignedTo: flags.owner ? resolveAgent(flags.owner).owner : resolveAgent(config.automation.defaultWorkAgent).owner,
+      blockedReason: flags.waiting === 'human' ? 'triage' : null,
+      thinkingEffort: flags.effort || 'xhigh', targetMachine: flags.machine || MACHINE_ID,
+      deploymentTargets: [], deploymentType: 'none',
+      messages: [message(agent.label, `Created ${kind.prefix}-${nextNumber}.`)],
+      createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+    }));
+    json({ id, number, ref: `${kind.prefix}-${number}` });
   }
 
   // Build queues are per kind. The deploy queue spans every kind that deploys
@@ -199,10 +190,8 @@ function createBacklogAgent({
   async function candidatesFor(agent, deploy) {
     const waitingOn = deploy ? 'deployer' : 'agent';
     const queueKinds = new Map(kindsInQueue(deploy).map((kind) => [kind.id, kind]));
-    let query = items().where('waitingOn', '==', waitingOn);
-    if (queueKinds.size === 1) query = query.where('kind', '==', [...queueKinds.keys()][0]);
-    const snapshot = await query.limit(250).get();
-    const candidates = snapshot.docs.map((document) => ({ id: document.id, documentRef: document.ref, ...document.data() }))
+    const rows = await store.items.list({ waitingOn, kind: queueKinds.size === 1 ? [...queueKinds.keys()][0] : null, limit: 250 });
+    const candidates = rows
       .filter((data) => queueKinds.get(data.kind)?.activeStatuses.includes(data.status))
       .filter((data) => deploy || ownedBy(agent, data))
       .filter((data) => !deploy || data.deploymentApprovedAt)
@@ -216,23 +205,25 @@ function createBacklogAgent({
     const waitingOn = deploy ? 'deployer' : 'agent';
     const candidates = await candidatesFor(agent, deploy);
     for (const candidate of candidates) {
-      const claimed = await db.runTransaction(async (transaction) => {
-        const snapshot = await transaction.get(candidate.documentRef);
-        if (!snapshot.exists) return null;
-        const data = snapshot.data();
+      // The store re-reads the item and decides again inside its claim
+      // transaction, so a concurrent claimant either sees this lease or loses.
+      const claimed = await store.items.claim(candidate.id, async (data, tx) => {
+        if (!data) return null;
         const kind = requireKind(kinds, data.kind);
         if (data.waitingOn !== waitingOn || !kind.activeStatuses.includes(data.status) || !isLeaseOpen(data)) return null;
         if (deploy && (!kind.deploys || !data.deploymentApprovedAt)) return null;
         if (!deploy && (!ownedBy(agent, data) || !machineEligible(data))) return null;
-        if (!await dependenciesSatisfiedInTransaction(transaction, data)) return null;
-        transaction.update(candidate.documentRef, {
-          claimedBy: agent.token, leaseExpiresAt: Timestamp.fromMillis(Date.now() + 4 * 60 * 60 * 1000),
-          claimRunId: env.PROJECT_ADMIN_AGENT_RUN_ID || null,
-          status: deploy ? 'ready_for_deploy' : 'in_progress', blockedReason: null, updatedAt: FieldValue.serverTimestamp(),
-        });
+        if (!await dependenciesSatisfiedInTransaction(tx, data)) return null;
         return {
-          id: candidate.id, ...data, ref: itemReference(kinds, data),
-          approvedGate: deploy ? null : (data.blockedReason || null), blockedReason: null, claimedBy: agent.token,
+          patch: {
+            claimedBy: agent.token, leaseExpiresAt: store.fromMillis(Date.now() + 4 * 60 * 60 * 1000),
+            claimRunId: env.PROJECT_ADMIN_AGENT_RUN_ID || null,
+            status: deploy ? 'ready_for_deploy' : 'in_progress', blockedReason: null, updatedAt: serverTimestamp(),
+          },
+          result: {
+            id: candidate.id, ...data, ref: itemReference(kinds, data),
+            approvedGate: deploy ? null : (data.blockedReason || null), blockedReason: null, claimedBy: agent.token,
+          },
         };
       });
       if (claimed) { await attachRun(claimed); json(claimed); return; }
@@ -246,10 +237,7 @@ function createBacklogAgent({
     json({ count: candidates.length, topThinkingEffort: candidates[0]?.thinkingEffort || 'xhigh' });
   }
   async function list(flags) {
-    let query = items();
-    if (scopedKind) query = query.where('kind', '==', scopedKind.id);
-    const snapshot = await query.limit(300).get();
-    const rows = snapshot.docs.map((document) => ({ id: document.id, ...document.data() }))
+    const rows = (await store.items.list({ kind: scopedKind?.id || null, limit: 300 }))
       .filter((data) => flags.all === true || kinds.find((kind) => kind.id === data.kind)?.activeStatuses.includes(data.status))
       .sort(sortItems);
     json(rows);
@@ -260,13 +248,12 @@ function createBacklogAgent({
   }
   async function mutate(id, flags, changes, body) {
     const agent = agentFrom(flags);
-    const { ref, data, kind } = await loadItem(id);
+    const { data, kind } = await loadItem(id);
     const resolvedChanges = typeof changes === 'function' ? changes(data, kind) : changes;
-    const patch = { ...resolvedChanges, claimedBy: null, claimRunId: null, leaseExpiresAt: null, updatedAt: FieldValue.serverTimestamp() };
-    const imageUrls = await uploadAttachments(flags.images, { uploader: `agent-${agent.token}`, kind: kind.id, itemId: id });
+    const patch = { ...resolvedChanges, claimedBy: null, claimRunId: null, leaseExpiresAt: null, updatedAt: serverTimestamp() };
+    const imageUrls = await upload(flags.images, { uploader: `agent-${agent.token}`, kind: kind.id, itemId: id });
     if (imageUrls.length > 0 && !body) throw new Error('--images requires -m "message" so the attachments belong to a note');
-    if (body) patch.messages = FieldValue.arrayUnion(message(agent.label, body, imageUrls));
-    await ref.update(patch);
+    await store.items.update(id, patch, { messages: body ? [message(agent.label, body, imageUrls)] : [] });
     json({ ok: true, id, ref: itemReference(kinds, data), ...resolvedChanges, ...(imageUrls.length ? { imageUrls } : {}) });
   }
 
@@ -291,26 +278,25 @@ function createBacklogAgent({
     normalizeDeploymentTargets([target]);
     const proof = requireMeaningfulFlag(flags, 'proof');
     const acceptance = requireMeaningfulFlag(flags, 'acceptance');
-    const ref = items().doc(id);
-    const result = await db.runTransaction(async (transaction) => {
-      const snapshot = await transaction.get(ref);
-      if (!snapshot.exists) throw new Error(`${id} not found`);
-      const data = snapshot.data();
+    const result = await store.items.transact(id, (data) => {
+      if (!data) throw new Error(`${id} not found`);
       requireDeploys(kindOf(id, data));
       requireDeployClaim(data, agent);
       const targets = requireApprovedTarget(data, target);
       const evidence = {
         ...(data.deploymentEvidence || {}),
-        [target]: { proof, acceptance, verifiedAt: Timestamp.now(), verifiedBy: agent.token },
+        [target]: { proof, acceptance, verifiedAt: store.now(), verifiedBy: agent.token },
       };
-      transaction.update(ref, {
-        deploymentEvidence: evidence,
-        deploymentResult: `${target}: ${proof}\nAcceptance: ${acceptance}`,
-        deploymentInProgressTarget: null,
-        messages: FieldValue.arrayUnion(message(agent.label, `Verified ${target}. ${proof} Acceptance: ${acceptance}`)),
-        updatedAt: FieldValue.serverTimestamp(),
-      });
-      return { ref: itemReference(kinds, data), targets, evidence };
+      return {
+        patch: {
+          deploymentEvidence: evidence,
+          deploymentResult: `${target}: ${proof}\nAcceptance: ${acceptance}`,
+          deploymentInProgressTarget: null,
+          updatedAt: serverTimestamp(),
+        },
+        messages: [message(agent.label, `Verified ${target}. ${proof} Acceptance: ${acceptance}`)],
+        result: { ref: itemReference(kinds, data), targets, evidence },
+      };
     });
     json({ ok: true, id, ...result });
   }
@@ -319,24 +305,24 @@ function createBacklogAgent({
     const target = requireFlag(flags, 'target');
     const body = requireMessage(flags);
     const agent = agentFrom(flags);
-    const { ref, data, kind } = await loadItem(id);
+    const { data, kind } = await loadItem(id);
     requireDeploys(kind);
     requireDeployClaim(data, agent);
     requireApprovedTarget(data, target);
     if (target !== 'testflight') throw new Error('deployment-started is reserved for detached TestFlight processing');
-    await ref.update({
+    await store.items.update(id, {
       status: 'ready_for_deploy', waitingOn: 'hold', blockedReason: null,
-      deploymentInProgressTarget: target, deploymentStartedAt: FieldValue.serverTimestamp(),
+      deploymentInProgressTarget: target, deploymentStartedAt: serverTimestamp(),
       claimedBy: null, claimRunId: null, leaseExpiresAt: null,
-      messages: FieldValue.arrayUnion(message(agent.label, body)), updatedAt: FieldValue.serverTimestamp(),
-    });
+      updatedAt: serverTimestamp(),
+    }, { messages: [message(agent.label, body)] });
     json({ ok: true, id, ref: itemReference(kinds, data), target, waitingOn: 'hold' });
   }
 
   async function markVerificationPending(id, flags) {
     const result = requireMessage(flags);
     const agent = agentFrom(flags);
-    const { ref, data, kind } = await loadItem(id);
+    const { data, kind } = await loadItem(id);
     requireDeploys(kind);
     requireApprovedTarget(data, 'testflight');
     const evidence = {
@@ -344,17 +330,17 @@ function createBacklogAgent({
       testflight: {
         proof: result,
         acceptance: `The build is available for ${OWNER_NAME} to test against the work-item acceptance context.`,
-        verifiedAt: Timestamp.now(),
+        verifiedAt: store.now(),
         verifiedBy: agent.token,
       },
     };
-    await ref.update({
+    await store.items.update(id, {
       status: 'in_review', waitingOn: 'human', blockedReason: 'acceptance_review',
-      deployedAt: FieldValue.serverTimestamp(), deploymentVerifiedAt: FieldValue.serverTimestamp(),
+      deployedAt: serverTimestamp(), deploymentVerifiedAt: serverTimestamp(),
       deploymentBuild: flags.build || '', deploymentResult: result, deploymentEvidence: evidence,
       deploymentInProgressTarget: null, claimedBy: null, claimRunId: null, leaseExpiresAt: null,
-      messages: FieldValue.arrayUnion(message(agent.label, result)), updatedAt: FieldValue.serverTimestamp(),
-    });
+      updatedAt: serverTimestamp(),
+    }, { messages: [message(agent.label, result)] });
     json({ ok: true, id, ref: itemReference(kinds, data), target: 'testflight', status: 'in_review' });
   }
 
@@ -373,8 +359,8 @@ function createBacklogAgent({
     if (missing.length > 0) throw new Error(`Cannot complete deployment; missing target-specific proof and acceptance verification for: ${missing.join(', ')}`);
     return mutate(id, flags, {
       status: kind.statuses.done, waitingOn: 'done', blockedReason: null,
-      [kind.completedAtField]: FieldValue.serverTimestamp(), deployedAt: FieldValue.serverTimestamp(),
-      deploymentVerifiedAt: FieldValue.serverTimestamp(), deploymentResult: result, resolution: result,
+      [kind.completedAtField]: serverTimestamp(), deployedAt: serverTimestamp(),
+      deploymentVerifiedAt: serverTimestamp(), deploymentResult: result, resolution: result,
     }, result);
   }
   // The only completion path for kinds that never deploy, and the no-release
@@ -387,7 +373,7 @@ function createBacklogAgent({
     assertClosableWithoutDeployment(data);
     const body = `Closed without deployment: ${note}`;
     return mutate(id, flags, {
-      status: kind.statuses.done, [kind.completedAtField]: FieldValue.serverTimestamp(),
+      status: kind.statuses.done, [kind.completedAtField]: serverTimestamp(),
       waitingOn: 'done', blockedReason: null, resolution: note,
     }, body);
   }
@@ -471,8 +457,8 @@ function runCli(argv = process.argv.slice(2)) {
   const { flags } = parseArgs(argv);
   const kindId = (typeof flags.kind === 'string' ? flags.kind : '') || process.env.PROJECT_ADMIN_WORK_KIND || null;
   return Promise.resolve().then(() => {
-    const { FieldValue, Timestamp } = require('@google-cloud/firestore');
-    return createBacklogAgent({ db: require('./firestore'), FieldValue, Timestamp, kindId }).run(argv);
+    const { openStore } = require('./store');
+    return createBacklogAgent({ store: openStore(), kindId }).run(argv);
   }).catch((error) => {
     console.error(JSON.stringify({ error: error.message, kind: kindId, host: os.hostname() }));
     process.exitCode = 1;

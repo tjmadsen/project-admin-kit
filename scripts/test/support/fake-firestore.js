@@ -1,8 +1,10 @@
 'use strict';
 
 // Minimal in-memory Firestore for CLI and migration tests: collections, docs,
-// equality where(), limit(), getAll(), transactions applied immediately, and
-// the two FieldValue sentinels the backlog CLI writes.
+// equality where(), orderBy() (ignored), limit(), add(), delete(), getAll(),
+// the two FieldValue sentinels the backlog CLI writes, and transactions with
+// Firestore's optimistic concurrency: writes are buffered and committed only
+// if no document the transaction read changed meanwhile, else it retries.
 
 const SERVER_TIMESTAMP = Symbol('serverTimestamp');
 const ARRAY_UNION = Symbol('arrayUnion');
@@ -30,20 +32,35 @@ function clone(value) {
 
 function createFakeFirestore({ now = () => new Date() } = {}) {
   const store = new Map(); // "collection/id" -> data
+  const versions = new Map(); // "collection/id" -> write count
   let autoId = 0;
 
   function snapshot(ref) {
     const data = store.get(ref.path);
     return { id: ref.id, ref, exists: data !== undefined, data: () => (data === undefined ? undefined : clone(data)) };
   }
+  // set(..., { merge: true }) merges nested maps key by key, as Firestore does.
+  function mergeInto(base, data) {
+    for (const [key, value] of Object.entries(data)) {
+      const isMap = value && Object.getPrototypeOf(value) === Object.prototype && !value[SERVER_TIMESTAMP] && !value[ARRAY_UNION];
+      if (isMap && base[key] && Object.getPrototypeOf(base[key]) === Object.prototype) base[key] = mergeInto({ ...base[key] }, value);
+      else base[key] = resolveValue(base[key], value, now);
+    }
+    return base;
+  }
   function write(ref, data, merge) {
     const base = merge ? { ...(store.get(ref.path) || {}) } : {};
-    for (const [key, value] of Object.entries(data)) base[key] = resolveValue(base[key], value, now);
+    mergeInto(base, data);
     store.set(ref.path, base);
+    versions.set(ref.path, (versions.get(ref.path) || 0) + 1);
   }
   function update(ref, patch) {
     if (!store.has(ref.path)) throw new Error(`No document to update: ${ref.path}`);
-    write(ref, patch, true);
+    // update() replaces each top-level field, maps included.
+    const base = { ...store.get(ref.path) };
+    for (const [key, value] of Object.entries(patch)) base[key] = resolveValue(base[key], value, now);
+    store.set(ref.path, base);
+    versions.set(ref.path, (versions.get(ref.path) || 0) + 1);
   }
   function docRef(collection, id = `auto-${(autoId += 1)}`) {
     const ref = {
@@ -52,6 +69,7 @@ function createFakeFirestore({ now = () => new Date() } = {}) {
       get: async () => snapshot(ref),
       set: async (data, options = {}) => write(ref, data, Boolean(options.merge)),
       update: async (patch) => update(ref, patch),
+      delete: async () => { store.delete(ref.path); versions.set(ref.path, (versions.get(ref.path) || 0) + 1); },
     };
     return ref;
   }
@@ -62,6 +80,7 @@ function createFakeFirestore({ now = () => new Date() } = {}) {
         return query(collection, [...filters, [field, value]], max);
       },
       limit: (count) => query(collection, filters, count),
+      orderBy: () => query(collection, filters, max),
       get: async () => {
         const docs = [...store.keys()]
           .filter((key) => key.startsWith(`${collection}/`))
@@ -73,15 +92,33 @@ function createFakeFirestore({ now = () => new Date() } = {}) {
     };
   }
 
+  async function runTransaction(operation, attempts = 5) {
+    for (let attempt = 1; ; attempt += 1) {
+      const reads = new Map();
+      const writes = [];
+      const read = (ref) => { reads.set(ref.path, versions.get(ref.path) || 0); return snapshot(ref); };
+      const result = await operation({
+        get: async (ref) => read(ref),
+        getAll: async (...refs) => refs.map(read),
+        set: (ref, data, options = {}) => { writes.push(() => write(ref, data, Boolean(options.merge))); },
+        update: (ref, patch) => { writes.push(() => update(ref, patch)); },
+      });
+      if ([...reads].every(([path, version]) => (versions.get(path) || 0) === version)) {
+        for (const apply of writes) apply();
+        return result;
+      }
+      if (attempt >= attempts) throw new Error('fake firestore: transaction contention');
+    }
+  }
+
   const db = {
-    collection: (name) => ({ ...query(name), doc: (id) => docRef(name, id) }),
-    getAll: async (...refs) => refs.map(snapshot),
-    runTransaction: async (operation) => operation({
-      get: async (ref) => snapshot(ref),
-      getAll: async (...refs) => refs.map(snapshot),
-      set: (ref, data, options = {}) => write(ref, data, Boolean(options.merge)),
-      update: (ref, patch) => update(ref, patch),
+    collection: (name) => ({
+      ...query(name),
+      doc: (id) => docRef(name, id),
+      add: async (data) => { const ref = docRef(name); write(ref, data, false); return ref; },
     }),
+    getAll: async (...refs) => refs.map(snapshot),
+    runTransaction,
     // Test helpers.
     seed: (path, data) => store.set(path, clone(data)),
     read: (path) => clone(store.get(path)),

@@ -3,7 +3,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { ROOT, CONFIG_PATH, loadProjectConfig } = require('./lib/project-config');
+const { ROOT, CONFIG_PATH, loadProjectConfig, resolveBackend } = require('./lib/project-config');
 const { normalizeRoster } = require('./lib/agent-roster');
 const { loadWorkKinds, queueNames, syncDerivedFiles } = require('./lib/work-kinds');
 
@@ -48,13 +48,39 @@ function updateMarketingPage(config) {
   fs.writeFileSync(file, html);
 }
 
+// --backend firestore|local|github (docs/BACKENDS.md). Firestore is the
+// default and is written as an absent key, so existing configs stay unchanged.
+function applyBackend(config, flags) {
+  if (typeof flags.backend !== 'string') return;
+  if (flags.backend === 'firestore') {
+    delete config.backend;
+  } else {
+    config.backend = { type: flags.backend };
+    if (flags.backend === 'local' && typeof flags.localPath === 'string') config.backend.path = flags.localPath;
+    if (flags.backend === 'github') {
+      if (typeof flags.githubRepo === 'string') config.backend.repository = flags.githubRepo;
+      if (typeof flags.labelPrefix === 'string') config.backend.labelPrefix = flags.labelPrefix;
+    }
+  }
+  resolveBackend(config);
+}
+
+const NEXT_STEPS = {
+  firestore: 'npm run install:all, firebase login, then npm run bootstrap-admin.',
+  local: 'npm run install:all, npm run bootstrap-admin, npm run build, then npm run local.',
+  github: 'npm run install:all and `gh auth login` (or export GITHUB_TOKEN); manage work in GitHub Issues (docs/BACKENDS.md).',
+};
+
 function main() {
   const flags = parseArgs(process.argv.slice(2));
   if (flags.help) {
-    console.log('npm run configure -- --name "App Name" --slug app-name --firebase-project id --api-key key --messaging-sender-id id --app-id id --production-url https://app.example --owner-email owner@example.com --owner-name "Owner" --repo owner/repo');
+    console.log('npm run configure -- --name "App Name" --slug app-name [--backend firestore|local|github] --firebase-project id --api-key key --messaging-sender-id id --app-id id --production-url https://app.example --owner-email owner@example.com --owner-name "Owner" --repo owner/repo');
+    console.log('  --backend local  [--local-path ~/.project-admin/app/store.json]   no Firebase keys needed');
+    console.log('  --backend github [--github-repo owner/repo] [--label-prefix pa:]   no Firebase keys needed');
     return;
   }
   const config = loadProjectConfig();
+  applyBackend(config, flags);
   for (const [flag, keys] of Object.entries(FLAG_PATHS)) if (typeof flags[flag] === 'string') setPath(config, keys, flags[flag]);
   if (typeof flags.name === 'string' && typeof flags.shortName !== 'string') config.project.shortName = flags.name;
   if (typeof flags.name === 'string' && typeof flags.slug !== 'string') config.project.slug = flags.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -64,8 +90,12 @@ function main() {
   }
   config.admin.ownerEmail = config.admin.ownerEmail.toLowerCase();
   config.project.adminPath = `/${config.project.adminPath.replace(/^\/+|\/+$/g, '')}`;
+  // Re-validate the edited config (backend-specific requirements included)
+  // before anything is written.
+  const backend = resolveBackend(config);
+  if (backend.type === 'firestore' && !config.project.firebaseProjectId) throw new Error('The firestore backend needs --firebase-project');
   writeJson(CONFIG_PATH, config);
-  writeJson(path.join(ROOT, '.firebaserc'), { projects: { default: config.project.firebaseProjectId } });
+  if (config.project.firebaseProjectId) writeJson(path.join(ROOT, '.firebaserc'), { projects: { default: config.project.firebaseProjectId } });
   const firebaseConfig = JSON.parse(fs.readFileSync(path.join(ROOT, 'firebase.json'), 'utf8'));
   const adminPath = config.project.adminPath.replace(/\/$/, '');
   firebaseConfig.firestore.location = config.project.firestoreLocation;
@@ -97,7 +127,8 @@ function main() {
   updateMarketingPage(config);
   // Rules, Functions, and the iOS wrapper carry generated copies of workKinds.
   syncDerivedFiles({ root: ROOT, kinds: loadWorkKinds(config) });
-  console.log(`Configured ${config.project.name}. Next: npm run install:all, firebase login, then npm run bootstrap-admin.`);
+  loadProjectConfig(); // throws if the written config is invalid for its backend
+  console.log(`Configured ${config.project.name} (${backend.type} backend). Next: ${NEXT_STEPS[backend.type]}`);
 }
 
 main();

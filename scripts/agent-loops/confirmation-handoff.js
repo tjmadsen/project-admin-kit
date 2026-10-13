@@ -56,41 +56,38 @@ function confirmationHandoffMessage(output) {
 }
 
 async function handoffConfirmationRequest(runId, rawReason, rawOutput, dependencies) {
-  const { database, fieldValue, timestamp, agentLabelFor } = dependencies;
-  const runSnapshot = await database.collection('agentLoopRuns').doc(runId).get();
-  if (!runSnapshot.exists) throw new Error(`Loop run ${runId} not found`);
-  const run = runSnapshot.data();
+  const { store, agentLabelFor } = dependencies;
+  const run = await store.runs.get(runId);
+  if (!run) throw new Error(`Loop run ${runId} not found`);
   const collection = collectionForRun(run);
   if (!run.activeItemId || !collection) {
     return { asked: false, runId, reason: 'run has no active item' };
   }
 
-  const itemRef = database.collection(collection).doc(run.activeItemId);
   let result = { asked: false, runId, itemId: run.activeItemId, reason: 'claim is not an active deploy claim owned by this run' };
-  await database.runTransaction(async (transaction) => {
-    const itemSnapshot = await transaction.get(itemRef);
-    if (!itemSnapshot.exists) {
+  await store.items.transact(run.activeItemId, (item) => {
+    if (!item) {
       result = { asked: false, runId, itemId: run.activeItemId, reason: 'active item no longer exists' };
-      return;
+      return null;
     }
-    const item = itemSnapshot.data();
-    if (!canCreateConfirmationHandoff(item, run, runId, rawReason)) return;
-    const reference = runItemReference(run, item);
-    transaction.update(itemRef, {
-      status: 'blocked',
-      waitingOn: 'human',
-      blockedReason: 'question',
-      claimedBy: null,
-      claimRunId: null,
-      leaseExpiresAt: null,
-      updatedAt: fieldValue.serverTimestamp(),
-      messages: fieldValue.arrayUnion({
+    if (!canCreateConfirmationHandoff(item, run, runId, rawReason)) return null;
+    result = { asked: true, runId, itemId: run.activeItemId, reference: runItemReference(run, item) };
+    return {
+      patch: {
+        status: 'blocked',
+        waitingOn: 'human',
+        blockedReason: 'question',
+        claimedBy: null,
+        claimRunId: null,
+        leaseExpiresAt: null,
+        updatedAt: store.serverTimestamp(),
+      },
+      messages: [{
         author: agentLabelFor(run.agent),
         body: confirmationHandoffMessage(rawOutput),
-        createdAt: timestamp.now(),
-      }),
-    });
-    result = { asked: true, runId, itemId: run.activeItemId, reference };
+        createdAt: store.now(),
+      }],
+    };
   });
   return result;
 }

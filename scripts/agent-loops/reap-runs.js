@@ -61,8 +61,7 @@ function abandonedReason(run, { machineId, nowMs, staleMs, isProcessAlive = proc
 
 async function reapAbandonedRuns(options) {
   const {
-    database,
-    timestamp,
+    store,
     machineId,
     releaseClaim,
     staleMinutes = DEFAULT_STALE_MINUTES,
@@ -71,24 +70,23 @@ async function reapAbandonedRuns(options) {
     isProcessAlive = processIsAlive,
   } = options;
   const staleMs = Math.max(0, Number(staleMinutes) || 0) * 60_000;
-  const snapshot = await database.collection('agentLoopRuns').where('status', '==', 'running').get();
+  const running = await store.runs.listByStatus('running');
   const reaped = [];
   const skipped = [];
 
-  for (const doc of snapshot.docs) {
-    const run = doc.data();
+  for (const { id: runId, ...run } of running) {
     if (machineId && run.machineId !== machineId) continue;
     const reason = abandonedReason(run, { machineId, nowMs: now, staleMs, isProcessAlive });
     const lastSign = lastSignMillis(run);
     if (!reason) {
       if (runnerPidOf(run) == null && lastSign != null && now - lastSign >= staleMs) {
-        skipped.push({ runId: doc.id, activeItem: run.activeItem || null, reason: 'the run recorded no runner pid, so it cannot be judged dead' });
+        skipped.push({ runId, activeItem: run.activeItem || null, reason: 'the run recorded no runner pid, so it cannot be judged dead' });
       }
       continue;
     }
     const startedAt = toMillis(run.startedAt) ?? lastSign;
     const entry = {
-      runId: doc.id,
+      runId,
       agent: run.agent || null,
       queue: run.queue || null,
       activeItem: run.activeItem || null,
@@ -101,22 +99,22 @@ async function reapAbandonedRuns(options) {
       // Hand the item back first: if this process dies in between, the row is
       // still "running" and the next sweep repeats the whole step.
       if (releaseClaim) {
-        const release = await releaseClaim(doc.id, `Loop run ended by signal: ${reason}`);
+        const release = await releaseClaim(runId, `Loop run ended by signal: ${reason}`);
         entry.released = Boolean(release && release.released);
         entry.itemId = (release && release.itemId) || null;
       }
-      await database.collection('agentLoopRuns').doc(doc.id).set({
+      await store.runs.merge(runId, {
         status: 'interrupted',
         exitCode: INTERRUPTED_EXIT_CODE,
-        finishedAt: timestamp.fromMillis(lastSign),
+        finishedAt: store.fromMillis(lastSign),
         durationSeconds: entry.durationSeconds,
         summary: `Run ended by signal without recording a result: ${reason}. Duration is measured to the last heartbeat.`,
-      }, { merge: true });
+      });
     }
     reaped.push(entry);
   }
 
-  return { machineId: machineId || null, staleMinutes: Number(staleMinutes) || 0, dryRun: Boolean(dryRun), scanned: snapshot.docs.length, reaped, skipped };
+  return { machineId: machineId || null, staleMinutes: Number(staleMinutes) || 0, dryRun: Boolean(dryRun), scanned: running.length, reaped, skipped };
 }
 
 module.exports = { DEFAULT_STALE_MINUTES, INTERRUPTED_EXIT_CODE, abandonedReason, processIsAlive, reapAbandonedRuns };
