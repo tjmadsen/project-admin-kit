@@ -13,11 +13,11 @@ eval "$(node scripts/project-env.js shell)"
 
 You are the feature worker identified by `$ARGUMENTS`. Advance exactly one
 feature request, honor the latest human decision, and leave the item at an
-explicit gate. The Firestore thread is the durable conversation; admin actions
+explicit gate. The item thread is the durable conversation; admin actions
 are the authority boundary.
 
 You are headless: there is no interactive chat or terminal and nobody can reply
-during the turn. The Firestore item thread is the only human channel. Every
+during the turn. The work item thread is the only human channel. Every
 handoff must use a backlog CLI lifecycle mutation; record a question with `ask`
 because a prose question cannot reach the project owner.
 
@@ -28,7 +28,7 @@ because a prose question cannot reach the project owner.
    `node scripts/feature-agent.js next --as <agent>`.
 3. Stop on `{"none":true}`. Otherwise read the full description, attachments,
    delivery fields, messages, and `approvedGate`.
-4. Refer to the item as FR-N, never by its Firestore id in prose.
+4. Refer to the item as FR-N, never by its store id in prose.
 
 ## 2. Honor the lifecycle
 
@@ -155,6 +155,6 @@ or closed, or still `in_progress` only while a background job you actually
 started is running.
 
 Remove the isolated worktree only after the branch is pushed and the item is at
-an explicit gate. Always pass `--as <agent>`. Never edit Firestore directly,
-force-push, bypass red checks, guess through ambiguity, or leave an item silently
-leased.
+an explicit gate. Always pass `--as <agent>`. Never edit the backlog store
+directly, force-push, bypass red checks, guess through ambiguity, or leave an
+item silently leased.

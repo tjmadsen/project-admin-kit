@@ -5,15 +5,27 @@
 | Surface | Responsibility |
 |---|---|
 | `admin-app/` | Human dashboard, backlog, actions, monitoring, and users |
-| Firestore/Storage rules | Browser and native-app authorization boundaries |
-| `scripts/` | Server-credential backlog mutations and agent orchestration |
+| Firestore/Storage rules | Browser and native-app authorization boundaries (firestore backend) |
+| `scripts/` | Backlog mutations through `scripts/lib/store/` and agent orchestration |
+| `scripts/local-server.js` | Loopback console server for the local backend |
 | `.claude/commands/` | Canonical per-kind (feature, bug, task) and deploy lifecycle policy |
 | `functions/` | Optional lifecycle email and FCM notifications |
 | `native-ios/` | Optional authenticated SwiftUI/WKWebView wrapper |
 
+## Backlog store
+
+`project-admin.config.json#backend` selects where the backlog and loop
+telemetry live: `firestore` (default), `local` (one JSON file), or `github`
+(Issues). Scripts use the `BacklogStore` interface in `scripts/lib/store/`
+(items create/get/list/update, transactional `transact` and lease `claim`,
+runs, machines, system documents, users, attachments); the console uses the
+adapter in `admin-app/src/data/`, chosen at build time. Lifecycle rules are
+backend-independent; [BACKENDS.md](BACKENDS.md) covers each store's setup,
+security model, and limits (claims on GitHub are best effort).
+
 ## Identity
 
-Google Auth proves identity. `adminUsers/{normalizedEmail}` grants an active
+The rest of this document describes the firestore backend. Google Auth proves identity. `adminUsers/{normalizedEmail}` grants an active
 `admin` or `collaborator` role. Firestore rules read that document for every
 protected request. Admins have lifecycle, routing, deployment, and user
 management authority. Collaborators can submit work, change its priority, add
@@ -54,7 +66,8 @@ All kinds share the `workItems` collection, distinguished by `kind`, so
 dependencies resolve across kinds. Documents carry status, `waitingOn`, review
 gate, messages, assignment, machine, lease, PR identity, release targets,
 immutable approval snapshot, and per-target evidence. Agent CLIs acquire
-transactional leases and always release a claim through an explicit lifecycle
+transactional leases (a file lock on the local store; comment arbitration on
+GitHub) and always release a claim through an explicit lifecycle
 mutation. Kinds with `planReview` add a mandatory plan-review gate before
 implementation; the deploy queue spans every kind with `deploys: true`.
 

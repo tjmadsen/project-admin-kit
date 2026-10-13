@@ -12,7 +12,7 @@ expand it. Reconcile the PR diff against a release matrix before merging.
 ## You are headless
 
 There is no interactive chat or terminal and nobody can reply during this
-turn. The Firestore item thread is the only human channel. The recorded
+turn. The work item thread is the only human channel. The recorded
 deployment approval fields, plus any later the project owner thread message that explicitly
 says yes, confirmed, or approved for a named action, are the action-time
 confirmation for that action. There is no second confirmation channel: execute

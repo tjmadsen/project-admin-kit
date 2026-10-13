@@ -9,6 +9,7 @@
   "scripts": {
     "configure": "node scripts/configure.js",
     "bootstrap-admin": "node scripts/admin-users.js add",
+    "local": "node scripts/local-server.js",
     "sync:work-kinds": "node scripts/lib/work-kinds.js sync",
     "migrate:work-items": "node scripts/migrate-work-items.js",
     "loops": "node scripts/agent-loops/scheduler.js",

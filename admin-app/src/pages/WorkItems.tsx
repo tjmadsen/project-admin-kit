@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from 'react'
-import { Timestamp, arrayUnion, collection, doc, runTransaction, serverTimestamp, updateDoc } from 'firebase/firestore'
 import EmptyState from '../components/EmptyState'
 import ActiveAgentBadge from '../components/ActiveAgentBadge'
 import { useRegisterDetailBack } from '../components/DetailBackContext'
@@ -13,7 +12,7 @@ import { useLoopRuns } from '../hooks/useLoopData'
 import { AGENT_MODELS, DEFAULT_WORK_AGENT, agentByOwner, agentByToken } from '../lib/agents'
 import { attachmentFilesFromDataTransfer, mergeAttachmentFiles, uploadWorkAttachments, type UploadedAttachments } from '../lib/attachments'
 import { deploymentTargetsFor, legacyDeploymentType, normalizeDeploymentTargets, pickerDeploymentTargets } from '../lib/deployment'
-import { db } from '../lib/firebase'
+import { arrayUnion, createWorkItem, newDocumentId, nowTimestamp, serverTimestamp, updateDocument } from '../data'
 import { deploymentLabel, formatRelative, gateLabel, itemRef, matchesItemReference, ownerLabel, toDate, waitingLabel } from '../lib/format'
 import { readPreference, writePreference } from '../lib/preferences'
 import { preferencePrefix, projectConfig } from '../lib/project-config'
@@ -469,7 +468,7 @@ function NewItem({ kind, canManage, actorEmail, onClose, onCreated }: { kind: Wo
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const definition = workKindOrFallback(kind)
-  const [draftId] = useState(() => doc(collection(db, WORK_ITEMS_COLLECTION)).id)
+  const [draftId] = useState(() => newDocumentId())
   const addAttachments = (incoming: File[]) => setAttachments((current) => {
     const merged = mergeAttachmentFiles(current, incoming)
     setAttachmentError(merged.error)
@@ -486,19 +485,14 @@ function NewItem({ kind, canManage, actorEmail, onClose, onCreated }: { kind: Wo
     let uploaded: UploadedAttachments | undefined
     try {
       uploaded = await uploadWorkAttachments(attachments, kind, draftId, actorEmail)
-      const itemDoc = doc(db, WORK_ITEMS_COLLECTION, draftId)
-      await runTransaction(db, async (transaction) => {
-        const counterRef = doc(db, 'system', 'counters')
-        const counter = await transaction.get(counterRef)
-        const field = counterFieldFor(kind)
-        const number = Number(counter.data()?.[field] ?? 0) + 1
-        transaction.set(counterRef, { [field]: number, updatedAt: serverTimestamp() }, { merge: true })
-        transaction.set(itemDoc, {
-          kind, number, title: title.trim(), description: description.trim(), imageUrls: uploaded?.urls || [], priority,
+      // The data layer allocates the kind's next number atomically.
+      await createWorkItem({
+        id: draftId, counterField: counterFieldFor(kind), data: {
+          kind, title: title.trim(), description: description.trim(), imageUrls: uploaded?.urls || [], priority,
           status: definition.statuses.initial, waitingOn: canManage && routeNow ? 'agent' : 'human', blockedReason: canManage && routeNow ? null : 'triage', assignedTo: owner,
           thinkingEffort: effort, targetMachine: projectConfig.automation.defaultMachineId, deploymentType: 'none', deploymentTargets: [], messages: [],
           createdByEmail: actorEmail.toLowerCase(), createdByRole: canManage ? 'admin' : 'collaborator', createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
-        })
+        },
       })
       onCreated(draftId)
     } catch (err) {
@@ -550,7 +544,7 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
   const previousMessageCountRef = useRef(groupThreadMessages(item.messages || []).length)
   const wasNearBottomRef = useRef(true)
   const isPhoneLayout = usePhoneDetailLayout()
-  const itemDoc = doc(db, WORK_ITEMS_COLLECTION, item.id)
+  const updateItem = (changes: Record<string, unknown>) => updateDocument(WORK_ITEMS_COLLECTION, item.id, changes)
   const definition = workKindOrFallback(item.kind)
   const completion = completionCopy(definition)
   const declining = declineCopy(definition)
@@ -570,7 +564,7 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
   }
   const patch = async (data: Record<string, unknown>) => {
     setBusy(true); setError('')
-    try { await updateDoc(itemDoc, { ...data, updatedAt: serverTimestamp() }); return true }
+    try { await updateItem({ ...data, updatedAt: serverTimestamp() }); return true }
     catch (err) { setError(err instanceof Error ? err.message : 'Update failed.'); return false }
     finally { setBusy(false) }
   }
@@ -586,9 +580,9 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
     let uploaded: UploadedAttachments | undefined
     try {
       uploaded = await uploadWorkAttachments(attachments, item.kind, item.id, actorEmail)
-      const changes: Record<string, unknown> = { messages: arrayUnion({ author: actorName, authorEmail: actorEmail.toLowerCase(), body: message.trim(), imageUrls: uploaded.urls, createdAt: Timestamp.now() }), updatedAt: serverTimestamp() }
+      const changes: Record<string, unknown> = { messages: arrayUnion({ author: actorName, authorEmail: actorEmail.toLowerCase(), body: message.trim(), imageUrls: uploaded.urls, createdAt: nowTimestamp() }), updatedAt: serverTimestamp() }
       if (returnToAgent) Object.assign(changes, { waitingOn: 'agent', status: 'in_progress', blockedReason: null, leaseExpiresAt: null, claimedBy: null })
-      await updateDoc(itemDoc, changes)
+      await updateItem(changes)
       setMessage(''); setAttachments([]); setAttachmentError('')
       if (returnToAgent) onDone(changes, sentToAgentLabel)
     } catch (err) {
@@ -614,7 +608,7 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
   // note the thread carries no record of the decision the agent is resuming from.
   const approveAndReturn = () => {
     const changes = {
-      messages: arrayUnion({ author: actorName, authorEmail: actorEmail.toLowerCase(), body: APPROVAL_NOTE, imageUrls: [], createdAt: Timestamp.now() }),
+      messages: arrayUnion({ author: actorName, authorEmail: actorEmail.toLowerCase(), body: APPROVAL_NOTE, imageUrls: [], createdAt: nowTimestamp() }),
       waitingOn: 'agent', status: 'in_progress', blockedReason: null, leaseExpiresAt: null, claimedBy: null,
     }
     return patchAndFinish(changes, sentToAgentLabel)
@@ -682,7 +676,7 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
     const changes = {
       status: definition.statuses.done, [definition.completedAtField]: serverTimestamp(),
       waitingOn: 'done', blockedReason: null, resolution: note, leaseExpiresAt: null, claimedBy: null,
-      messages: arrayUnion({ author: actorName, authorEmail: actorEmail.toLowerCase(), body: `Closed without deployment: ${note}`, imageUrls: [], createdAt: Timestamp.now() }),
+      messages: arrayUnion({ author: actorName, authorEmail: actorEmail.toLowerCase(), body: `Closed without deployment: ${note}`, imageUrls: [], createdAt: nowTimestamp() }),
     }
     const done = await patchAndFinish(changes, completion.closed)
     if (done) { setClosing(false); setCloseNote('') }

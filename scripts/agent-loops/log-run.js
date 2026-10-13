@@ -2,15 +2,17 @@
 'use strict';
 
 const os = require('node:os');
-const { FieldValue, Timestamp } = require('@google-cloud/firestore');
-const db = require('../lib/firestore');
 const { AGENTS, resolveAgent } = require('../lib/agents');
 const { TOKEN_PATTERN } = require('../lib/agent-roster');
+const { openStore } = require('../lib/store');
 const { claimBelongsToRun, collectionForRun, runItemReference } = require('./run-claims');
 const { handoffConfirmationRequest } = require('./confirmation-handoff');
 const { reapAbandonedRuns } = require('./reap-runs');
 const { loadProjectConfig } = require('../lib/project-config');
 const projectConfig = loadProjectConfig();
+// Opened lazily so `--help`-style usage errors need no credentials.
+let openedStore;
+const store = () => (openedStore ||= openStore({ config: projectConfig }));
 
 // Value flags consume the next argument, which is why the boolean ones have to
 // be declared: `--summary` is free-form log tail that may itself start with a
@@ -28,58 +30,49 @@ function flags(argv) {
   return result;
 }
 async function heartbeatMachine(machineId) {
-  await db.collection('agentMachines').doc(machineId).set({
+  await store().machines.merge(machineId, {
     label: machineId === projectConfig.automation.defaultMachineId ? projectConfig.automation.defaultMachineLabel : machineId, hostname: os.hostname(),
-    status: 'online', repoRoot: process.cwd(), agents: Object.keys(AGENTS), lastSeenAt: FieldValue.serverTimestamp(),
-  }, { merge: true });
+    status: 'online', repoRoot: process.cwd(), agents: Object.keys(AGENTS), lastSeenAt: store().serverTimestamp(),
+  });
 }
 
 async function releaseRunClaim(runId, rawReason) {
-  const runSnapshot = await db.collection('agentLoopRuns').doc(runId).get();
-  if (!runSnapshot.exists) throw new Error(`Loop run ${runId} not found`);
-  const run = runSnapshot.data();
+  const run = await store().runs.get(runId);
+  if (!run) throw new Error(`Loop run ${runId} not found`);
   const collection = collectionForRun(run);
   if (!run.activeItemId || !collection) return { released: false, runId, reason: 'run has no active item' };
 
   const agent = resolveAgent(run.agent);
   const reason = String(rawReason || 'Worker exited before the lifecycle handoff completed').replace(/[\r\n]+/g, ' ').slice(0, 280);
-  const itemRef = db.collection(collection).doc(run.activeItemId);
   let result = { released: false, runId, itemId: run.activeItemId, reason: 'claim no longer belongs to this run agent' };
-  await db.runTransaction(async (transaction) => {
-    const itemSnapshot = await transaction.get(itemRef);
-    if (!itemSnapshot.exists) {
+  await store().items.transact(run.activeItemId, (item) => {
+    if (!item) {
       result = { released: false, runId, itemId: run.activeItemId, reason: 'active item no longer exists' };
-      return;
+      return null;
     }
-    const item = itemSnapshot.data();
-    if (!claimBelongsToRun(item, run, runId)) return;
+    if (!claimBelongsToRun(item, run, runId)) return null;
     const reference = runItemReference(run, item);
     const destination = run.queue === 'deploy' ? 'deploy queue' : `${agent.label} queue`;
-    transaction.update(itemRef, {
-      claimedBy: null,
-      claimRunId: null,
-      leaseExpiresAt: null,
-      updatedAt: FieldValue.serverTimestamp(),
-      messages: FieldValue.arrayUnion({
+    result = { released: true, runId, itemId: run.activeItemId, reference };
+    return {
+      patch: { claimedBy: null, claimRunId: null, leaseExpiresAt: null, updatedAt: store().serverTimestamp() },
+      messages: [{
         author: agent.label,
         body: `Loop interrupted before lifecycle handoff: ${reason}. Any existing worktree was preserved; ${reference} was returned to the ${destination}.`,
-        createdAt: Timestamp.now(),
-      }),
-    });
-    result = { released: true, runId, itemId: run.activeItemId, reference };
+        createdAt: store().now(),
+      }],
+    };
   });
   return result;
 }
 
 async function handoffStatus(runId) {
-  const runSnapshot = await db.collection('agentLoopRuns').doc(runId).get();
-  if (!runSnapshot.exists) throw new Error(`Loop run ${runId} not found`);
-  const run = runSnapshot.data();
+  const run = await store().runs.get(runId);
+  if (!run) throw new Error(`Loop run ${runId} not found`);
   const collection = collectionForRun(run);
   if (!run.activeItemId || !collection) return { complete: true };
-  const itemSnapshot = await db.collection(collection).doc(run.activeItemId).get();
-  if (!itemSnapshot.exists) return { complete: true };
-  const item = itemSnapshot.data();
+  const item = await store().items.get(run.activeItemId);
+  if (!item) return { complete: true };
   const stillOwnedByRun = claimBelongsToRun(item, run, runId);
   return stillOwnedByRun
     ? { complete: false, reason: 'Worker exited without recording a lifecycle handoff or releasing its claim' }
@@ -99,18 +92,18 @@ async function main() {
       throw new Error('Usage: log-run.js usage --provider <provider> --used-percent 0..100');
     }
     const resetsAt = options['resets-at'] ? new Date(options['resets-at']) : null;
-    await db.collection('system').doc('agentLoopUsage').set({
+    await store().system.merge('agentLoopUsage', {
       [provider]: {
         usedPercent,
         resetsAt: resetsAt && !Number.isNaN(resetsAt.getTime()) ? resetsAt : null,
         resetsLabel: options['resets-label'] || null,
-        capturedAt: FieldValue.serverTimestamp(),
-        lastAttemptAt: FieldValue.serverTimestamp(),
+        capturedAt: store().serverTimestamp(),
+        lastAttemptAt: store().serverTimestamp(),
         captureStatus: 'available',
         captureError: null,
         captureCliVersion: options['cli-version']?.slice(0, 80) || null,
       },
-    }, { merge: true });
+    });
     console.log('ok'); return;
   }
   if (command === 'usage-unavailable') {
@@ -122,21 +115,21 @@ async function main() {
     ]);
     if (!TOKEN_PATTERN.test(provider || '')) throw new Error('Missing or invalid usage provider');
     const captureError = allowedReasons.has(options.reason) ? options.reason : 'pty_error';
-    await db.collection('system').doc('agentLoopUsage').set({
+    await store().system.merge('agentLoopUsage', {
       [provider]: {
-        lastAttemptAt: FieldValue.serverTimestamp(),
+        lastAttemptAt: store().serverTimestamp(),
         captureStatus: 'unavailable',
         captureError,
         captureCliVersion: options['cli-version']?.slice(0, 80) || null,
       },
-    }, { merge: true });
+    });
     console.log('ok'); return;
   }
   if (command === 'configured-agent') {
     const queue = options.queue || 'deploy';
     if (queue !== 'deploy') throw new Error('Only the shared deploy queue has a configured agent');
-    const snapshot = await db.collection('system').doc('agentLoopConfig').get();
-    const token = snapshot.data()?.deployAgent || projectConfig.automation.defaultDeployAgent;
+    const loopConfig = await store().system.get('agentLoopConfig');
+    const token = loopConfig?.deployAgent || projectConfig.automation.defaultDeployAgent;
     process.stdout.write(resolveAgent(token).token);
     return;
   }
@@ -146,19 +139,18 @@ async function main() {
     // The runner pid is what lets `reap` tell a killed run from a sleeping
     // machine: a paused Mac keeps its pid, a booted-out process tree does not.
     const runnerPid = Number.parseInt(options.pid, 10);
-    const ref = await db.collection('agentLoopRuns').add({
+    const id = await store().runs.create({
       agent: options.agent, queue: options.queue, machineId, status: 'running',
       runnerPid: Number.isInteger(runnerPid) && runnerPid > 0 ? runnerPid : null,
       thinkingEffort: options.effort || null,
-      startedAt: FieldValue.serverTimestamp(), heartbeatAt: FieldValue.serverTimestamp(),
+      startedAt: store().serverTimestamp(), heartbeatAt: store().serverTimestamp(),
     });
-    process.stdout.write(ref.id);
+    process.stdout.write(id);
     return;
   }
   if (command === 'reap') {
     const result = await reapAbandonedRuns({
-      database: db,
-      timestamp: Timestamp,
+      store: store(),
       machineId,
       releaseClaim: releaseRunClaim,
       dryRun: Boolean(options['dry-run']),
@@ -180,35 +172,32 @@ async function main() {
   }
   if (command === 'confirmation-handoff') {
     const result = await handoffConfirmationRequest(runId, options.reason, options.output, {
-      database: db,
-      fieldValue: FieldValue,
-      timestamp: Timestamp,
+      store: store(),
       agentLabelFor: (token) => resolveAgent(token).label,
     });
     process.stdout.write(result.asked ? 'asked' : 'not_applicable');
     return;
   }
   if (command === 'heartbeat') {
-    await Promise.all([heartbeatMachine(machineId), db.collection('agentLoopRuns').doc(runId).set({ heartbeatAt: FieldValue.serverTimestamp() }, { merge: true })]);
+    await Promise.all([heartbeatMachine(machineId), store().runs.merge(runId, { heartbeatAt: store().serverTimestamp() })]);
     console.log('ok'); return;
   }
   if (command === 'progress') {
     const summary = String(options.summary || '').slice(-4000);
-    await Promise.all([heartbeatMachine(machineId), db.collection('agentLoopRuns').doc(runId).set({
-      heartbeatAt: FieldValue.serverTimestamp(), progressAt: FieldValue.serverTimestamp(), progressSummary: summary,
-    }, { merge: true })]);
+    await Promise.all([heartbeatMachine(machineId), store().runs.merge(runId, {
+      heartbeatAt: store().serverTimestamp(), progressAt: store().serverTimestamp(), progressSummary: summary,
+    })]);
     console.log('ok'); return;
   }
   if (command === 'finish') {
-    const ref = db.collection('agentLoopRuns').doc(runId);
-    const snapshot = await ref.get();
-    const started = snapshot.data()?.startedAt?.toMillis?.() ?? Date.now();
+    const run = await store().runs.get(runId);
+    const started = run?.startedAt?.toMillis?.() ?? Date.now();
     const exitCode = Number(options.code || 0);
-    await Promise.all([heartbeatMachine(machineId), ref.set({
+    await Promise.all([heartbeatMachine(machineId), store().runs.merge(runId, {
       status: exitCode === 0 ? 'completed' : 'failed', exitCode, summary: options.summary || '',
-      finishedAt: FieldValue.serverTimestamp(), heartbeatAt: FieldValue.serverTimestamp(),
+      finishedAt: store().serverTimestamp(), heartbeatAt: store().serverTimestamp(),
       durationSeconds: Math.max(0, Math.round((Date.now() - started) / 1000)),
-    }, { merge: true })]);
+    })]);
     console.log('ok'); return;
   }
   throw new Error('Usage: log-run.js <configured-agent|usage|usage-unavailable|start|heartbeat|progress|finish|handoff-status|confirmation-handoff|release-claim|reap|machine-heartbeat>');

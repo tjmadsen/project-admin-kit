@@ -13,7 +13,7 @@ function readJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
-test('configure applies a new project identity across deployable surfaces', (t) => {
+function copyKit(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'project-admin-configure-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   for (const relative of [
@@ -31,6 +31,11 @@ test('configure applies a new project identity across deployable surfaces', (t) 
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.copyFileSync(source, target);
   }
+  return root;
+}
+
+test('configure applies a new project identity across deployable surfaces', (t) => {
+  const root = copyKit(t);
 
   execFileSync(process.execPath, [path.join(root, 'scripts/configure.js'),
     '--name', 'Rocket Notes',
@@ -74,4 +79,24 @@ test('configure applies a new project identity across deployable surfaces', (t) 
   assert.equal(env.REPOSITORY_SLUG, 'example/rocket-notes');
   assert.equal(env.DEFAULT_BRANCH, 'trunk');
   assert.equal(env.ADMIN_BASE_URL, 'https://rocket.example/control');
+});
+
+test('configure --backend switches stores and only firestore needs Firebase identity', (t) => {
+  const root = copyKit(t);
+  const configPath = path.join(root, 'project-admin.config.json');
+  const withoutFirebase = readJson(configPath);
+  delete withoutFirebase.firebase;
+  fs.writeFileSync(configPath, JSON.stringify(withoutFirebase));
+  const configure = (...args) => execFileSync(process.execPath, [path.join(root, 'scripts/configure.js'), ...args], { encoding: 'utf8', env: { ...process.env, PROJECT_ADMIN_CONFIG: '' } });
+  const load = () => execFileSync(process.execPath, ['-e', 'console.log(JSON.stringify(require("./scripts/lib/project-config").loadProjectConfig().backend || null))'], { cwd: root, encoding: 'utf8', env: { ...process.env, PROJECT_ADMIN_CONFIG: '' } });
+
+  assert.match(configure('--backend', 'local', '--local-path', '~/data/app.json'), /\(local backend\)/);
+  assert.deepEqual(readJson(configPath).backend, { type: 'local', path: '~/data/app.json' });
+  assert.equal(load().trim(), '{"type":"local","path":"~/data/app.json"}');
+
+  assert.match(configure('--backend', 'github', '--github-repo', 'acme/backlog', '--label-prefix', 'ops:'), /GitHub Issues/);
+  assert.deepEqual(readJson(configPath).backend, { type: 'github', repository: 'acme/backlog', labelPrefix: 'ops:' });
+
+  assert.throws(() => configure('--backend', 'firestore'), /firebase\.apiKey .*required by the firestore backend/s);
+  assert.throws(() => configure('--backend', 'mongo'), /backend\.type must be one of firestore, local, github/);
 });

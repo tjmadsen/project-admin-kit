@@ -1,7 +1,9 @@
 # Project Admin instructions
 
-This repository combines a product site with a Firebase-hosted operations
-console, Firestore-backed work queues, and autonomous agent loops. Work item
+This repository combines a product site with an operations console, work
+queues in a pluggable store (`backend` in `project-admin.config.json`:
+Firestore by default, a local JSON file, or GitHub Issues; see
+`docs/BACKENDS.md`), and autonomous agent loops. Work item
 kinds (feature, bug, task, ...) are configured in `project-admin.config.json`
 under `workKinds`; read that file before operating on a project.
 
@@ -14,6 +16,7 @@ Run every suite a change touches.
 | Admin console | `cd admin-app && npm test` | all tests pass |
 | Admin production bundle | `cd admin-app && npm run build` | writes `public/admin/` (or the configured admin path) |
 | Firestore + Storage rules | `firebase emulators:exec --only firestore,storage --project demo-project-admin "cd admin-app && npm run test:rules"` | all rules tests pass |
+| Store contract | `cd scripts && node --test test/store-contract.test.js` | every scenario passes on firestore, local, and github (part of the agent tooling suite) |
 | Cloud Functions | `cd functions && npm test` | all tests pass |
 | Agent tooling | `cd scripts && npm test` | all tests pass |
 | Backlog credential smoke | `node scripts/work-agent.js --kind feature count --as terra` | returns a JSON count |
@@ -49,9 +52,10 @@ the canonical runbooks.
 
 ## Backlogs and loop agents
 
-- Every work item lives in the Firestore `workItems` collection with a `kind`
-  field and is changed only through `scripts/work-agent.js --kind <kind>` (or
-  the `feature-agent.js`/`bug-agent.js` shims) with `--as <agent>`.
+- Every work item lives in the configured store (Firestore `workItems`, the
+  local JSON store, or a GitHub issue) with a `kind` and is changed only through
+  `scripts/work-agent.js --kind <kind>` (or the `feature-agent.js`/`bug-agent.js`
+  shims) with `--as <agent>`. New persistence goes through `scripts/lib/store/`.
 - Build work happens in `.agent-worktrees/<agent>-<item>` based on the configured
   default branch. Never implement a backlog item in the shared checkout.
 - An item's `branchName` is durable: fetch and resume it instead of recreating it.
@@ -63,13 +67,17 @@ the canonical runbooks.
   approved target set with Scope/Commands/Verification/Acceptance notes, using
   each target's configured runbook. Targets with `requiresHumanAcceptance`
   (TestFlight by default) return to acceptance review instead of closing.
-- Never edit backlog Firestore documents directly.
+- Never edit backlog data directly: no hand edits to Firestore documents, the
+  local store file, or a GitHub issue's `project-admin:fields` block.
 
 ## Access and deployment
 
-The `adminUsers` collection is the authorization source. Bootstrap the first
-owner with `npm run bootstrap-admin`; thereafter use the Users screen. Never
-hard-code collaborator emails into source or security rules.
+On firestore, the `adminUsers` collection is the authorization source.
+Bootstrap the first owner with `npm run bootstrap-admin`; thereafter use the
+Users screen. The local backend is single-user (the configured owner, no
+authentication, 127.0.0.1 only); the github backend authorizes repository
+collaborators with write access. Never hard-code collaborator emails into
+source or security rules.
 
 Use Firebase Hosting for the site/admin bundle, deploy Firestore rules only
 after the emulator suite passes, and never force-push, bypass red checks, or

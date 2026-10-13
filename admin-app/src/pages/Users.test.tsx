@@ -9,19 +9,18 @@ const mocks = vi.hoisted(() => ({
   users: [] as Array<Record<string, unknown>>,
 }))
 
-vi.mock('firebase/firestore', () => ({
-  deleteDoc: mocks.deleteDoc,
-  doc: (_db: unknown, collection: string, id: string) => `${collection}/${id}`,
+// The page writes through the backend-neutral data layer.
+vi.mock('../data', () => ({
+  deleteDocument: (collection: string, id: string) => mocks.deleteDoc(`${collection}/${id}`),
   serverTimestamp: () => 'SERVER_TIMESTAMP',
-  setDoc: mocks.setDoc,
-  updateDoc: mocks.updateDoc,
+  setDocument: (collection: string, id: string, data: unknown, options: unknown) => mocks.setDoc(`${collection}/${id}`, data, options),
+  updateDocument: (collection: string, id: string, data: unknown) => mocks.updateDoc(`${collection}/${id}`, data),
 }))
 
 vi.mock('../hooks/useCollection', () => ({
   useCollection: () => ({ data: mocks.users, loading: false, error: '' }),
 }))
 
-vi.mock('../lib/firebase', () => ({ db: {} }))
 
 describe('Users access management', () => {
   beforeEach(() => {

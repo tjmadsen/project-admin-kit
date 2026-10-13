@@ -70,7 +70,7 @@ test('deploy instructions define the headless authorization and open handback co
   ]) {
     const instructions = read(relativePath);
     assert.match(instructions, /you are headless/i, `${relativePath} must identify the worker as headless`);
-    assert.match(instructions, /Firestore item thread is the only human channel/i);
+    assert.match(instructions, /work item thread is the only human channel/i);
     assert.match(instructions, /action-time\s+confirmation/i);
     assert.match(instructions, /Never re-ask for an already approved named action/i);
     assert.match(instructions, /what\s+is done, what remains, and concrete A\/B options/i);
@@ -83,7 +83,7 @@ test('every work-kind loop explains its only headless human channel', () => {
   for (const relativePath of [...kinds.map(promptFor), ...buildRunbooks]) {
     const instructions = read(relativePath);
     assert.match(instructions, /You are headless/i);
-    assert.match(instructions, /Firestore item thread is the only human channel/i);
+    assert.match(instructions, /work item thread is the only human channel/i);
     assert.match(instructions, /prose question/i);
     assert.match(instructions, /`ask`/i);
   }

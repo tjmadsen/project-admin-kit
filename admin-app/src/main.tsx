@@ -2,18 +2,25 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import App from './App'
-import { auth } from './lib/firebase'
-import { initNativeBridge } from './lib/native-bridge'
+import GitHubBackend from './pages/GitHubBackend'
+import { BACKEND, ready } from './data'
 import { initTheme } from './lib/theme'
 import { projectConfig } from './lib/project-config'
 import './index.css'
 
 async function bootstrap() {
   initTheme()
-  const nativeBridge = initNativeBridge(auth)
-  await nativeBridge.authReady
+  const root = ReactDOM.createRoot(document.getElementById('root')!)
+  // GitHub Issues is the whole interface for the github backend.
+  if (BACKEND === 'github') {
+    root.render(<React.StrictMode><GitHubBackend /></React.StrictMode>)
+    return
+  }
+  // Waits for the native shell's credential exchange (firestore) before React
+  // subscribes to auth.
+  await ready()
 
-  ReactDOM.createRoot(document.getElementById('root')!).render(
+  root.render(
     <React.StrictMode>
       <BrowserRouter basename={projectConfig.project.adminPath}>
         <App />

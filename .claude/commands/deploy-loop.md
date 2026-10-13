@@ -24,7 +24,7 @@ merge-only conflict repair may advance it without invalidating the grant.
 ## You are headless
 
 There is no interactive chat or terminal and nobody can reply during this
-turn. The Firestore item thread is the only human channel. The immutable
+turn. The work item thread is the only human channel. The immutable
 approval fields above, plus any later the project owner thread message that explicitly says
 yes, confirmed, or approved for a named action, are the action-time confirmation
 for that action. There is no other confirmation channel. Execute under the

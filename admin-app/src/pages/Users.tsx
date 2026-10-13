@@ -1,9 +1,8 @@
 import { useMemo, useState } from 'react'
-import { deleteDoc, doc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore'
 import EmptyState from '../components/EmptyState'
 import PageHeader from '../components/PageHeader'
 import { useCollection } from '../hooks/useCollection'
-import { db } from '../lib/firebase'
+import { deleteDocument, serverTimestamp, setDocument, updateDocument } from '../data'
 import { normalizeEmail } from '../lib/auth'
 import { formatRelative } from '../lib/format'
 import type { AdminUser } from '../lib/types'
@@ -27,7 +26,7 @@ export default function Users({ currentEmail }: { currentEmail: string }) {
     setBusy(normalized)
     setError('')
     try {
-      await setDoc(doc(db, 'adminUsers', normalized), {
+      await setDocument('adminUsers', normalized, {
         email: normalized,
         displayName: displayName.trim() || normalized.split('@')[0],
         role,
@@ -54,7 +53,7 @@ export default function Users({ currentEmail }: { currentEmail: string }) {
     setBusy(user.id)
     setError('')
     try {
-      await updateDoc(doc(db, 'adminUsers', user.id), { ...values, updatedAt: serverTimestamp() })
+      await updateDocument('adminUsers', user.id, { ...values, updatedAt: serverTimestamp() })
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not update this user.')
     } finally {
@@ -71,7 +70,7 @@ export default function Users({ currentEmail }: { currentEmail: string }) {
     setBusy(user.id)
     setError('')
     try {
-      await deleteDoc(doc(db, 'adminUsers', user.id))
+      await deleteDocument('adminUsers', user.id)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not remove this user.')
     } finally {

@@ -3,12 +3,12 @@
   "$id": "https://project-admin.local/project-admin.config.schema.json",
   "title": "Project Admin configuration",
   "type": "object",
-  "required": ["schemaVersion", "project", "firebase", "repository", "admin", "automation"],
+  "required": ["schemaVersion", "project", "repository", "admin", "automation", "deployments"],
   "properties": {
     "schemaVersion": { "const": 1 },
     "project": {
       "type": "object",
-      "required": ["name", "shortName", "slug", "productionUrl", "adminPath", "firebaseProjectId", "firestoreLocation"],
+      "required": ["name", "shortName", "slug", "productionUrl", "adminPath", "firestoreLocation"],
       "properties": {
         "name": { "type": "string", "minLength": 1 },
         "shortName": { "type": "string", "minLength": 1 },
@@ -33,6 +33,27 @@
         "slug": { "type": "string", "pattern": "^[^/]+/[^/]+$" },
         "defaultBranch": { "type": "string", "minLength": 1 }
       }
+    },
+    "backend": {
+      "description": "Backlog and telemetry store (docs/BACKENDS.md). Absent means firestore.",
+      "oneOf": [
+        { "type": "object", "required": ["type"], "additionalProperties": false, "properties": { "type": { "const": "firestore" } } },
+        {
+          "type": "object", "required": ["type"], "additionalProperties": false,
+          "properties": {
+            "type": { "const": "local" },
+            "path": { "type": "string", "minLength": 1, "description": "JSON store file; relative paths resolve against your home directory. Default ~/<automation.stateDirectory>/<project.slug>/store.json." }
+          }
+        },
+        {
+          "type": "object", "required": ["type"], "additionalProperties": false,
+          "properties": {
+            "type": { "const": "github" },
+            "repository": { "type": "string", "pattern": "^[^/\\s]+/[^/\\s]+$", "description": "owner/repo whose Issues hold the backlog. Default repository.slug." },
+            "labelPrefix": { "type": "string", "pattern": "^[A-Za-z0-9_.:/-]{1,20}$", "description": "Prefix for lifecycle labels. Default \"pa:\"." }
+          }
+        }
+      ]
     },
     "workKinds": {
       "description": "Work item kinds keyed by id. Omit for the built-in feature + bug pair. Fields left out fall back to the built-in kind with the same id (scripts/lib/work-kinds.defaults.json), then to generic defaults. Run `npm run sync:work-kinds` after editing.",
@@ -228,6 +249,13 @@
       "additionalProperties": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" }
     }
   },
+  "allOf": [
+    {
+      "description": "The firestore backend (the default) needs the Firebase web app and project identity.",
+      "if": { "anyOf": [{ "not": { "required": ["backend"] } }, { "properties": { "backend": { "properties": { "type": { "const": "firestore" } } } } }] },
+      "then": { "required": ["firebase"], "properties": { "project": { "required": ["firebaseProjectId"] } } }
+    }
+  ],
   "$defs": {
     "deployTarget": {
       "type": "object",

@@ -1,11 +1,10 @@
-import { doc, serverTimestamp, setDoc } from 'firebase/firestore'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import PageHeader from '../components/PageHeader'
 import EmptyState from '../components/EmptyState'
 import { useLoopConfig, useLoopRuns, useLoopUsage, useMachines } from '../hooks/useLoopData'
 import { AGENT_FAMILIES, AGENT_MODELS, agentByToken, runnerLabel, type AgentModel, type AgentModelToken } from '../lib/agents'
-import { db } from '../lib/firebase'
+import { serverTimestamp, setDocument } from '../data'
 import { formatRelative, toDate } from '../lib/format'
 import type { AgentLoopRun, AgentLoopUsageEntry } from '../lib/types'
 import { projectConfig } from '../lib/project-config'
@@ -162,7 +161,7 @@ export default function AgentLoops({ canManage = true }: { canManage?: boolean }
     if (!canManage) return
     setSaving(true)
     try {
-      await setDoc(doc(db, 'system', 'agentLoopConfig'), { deployAgent, updatedAt: serverTimestamp() }, { merge: true })
+      await setDocument('system', 'agentLoopConfig', { deployAgent, updatedAt: serverTimestamp() }, { merge: true })
     } finally {
       setSaving(false)
     }

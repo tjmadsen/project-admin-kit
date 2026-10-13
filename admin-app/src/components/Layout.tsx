@@ -1,9 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
-import type { User } from 'firebase/auth'
-import { auth } from '../lib/firebase'
+import { BACKEND, signOut, type SessionUser } from '../data'
 import { detectSidebarSwipe, resolveEdgeSwipeAction } from '../lib/edge-swipe'
-import { signOutAdmin } from '../lib/native-bridge'
 import type { AccessRole } from '../lib/auth'
 import { THEME_LABELS, THEME_PREFERENCES, readTheme, writeTheme, type ThemePreference } from '../lib/theme'
 import { useDetailBack } from './DetailBackContext'
@@ -40,7 +38,7 @@ const themeIcons: Record<ThemePreference, ReactNode> = {
   dark: <path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/>,
 }
 
-export default function Layout({ user, role, children }: { user: User; role: AccessRole; children: ReactNode }) {
+export default function Layout({ user, role, children }: { user: SessionUser; role: AccessRole; children: ReactNode }) {
   const [open, setOpen] = useState(false)
   const [theme, setTheme] = useState<ThemePreference>(() => readTheme())
   const location = useLocation()
@@ -116,7 +114,7 @@ export default function Layout({ user, role, children }: { user: User; role: Acc
         <div className="account">
           {user.photoURL ? <img src={user.photoURL} alt="" /> : <div className="avatar">{fallbackInitials}</div>}
           <div><strong>{user.displayName || user.email?.split('@')[0] || 'Collaborator'}</strong><span>{user.email}</span></div>
-          <button title="Sign out" aria-label="Sign out" onClick={() => void signOutAdmin(auth)}>↗</button>
+          {BACKEND !== 'local' && <button title="Sign out" aria-label="Sign out" onClick={() => void signOut()}>↗</button>}
           <div className="theme-toggle" role="radiogroup" aria-label="Appearance">
             {THEME_PREFERENCES.map((preference) => (
               <button key={preference} type="button" role="radio" aria-checked={theme === preference} className={theme === preference ? 'active' : ''} onClick={() => chooseTheme(preference)}>

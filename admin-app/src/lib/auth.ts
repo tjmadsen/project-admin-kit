@@ -1,6 +1,4 @@
-import type { User } from 'firebase/auth'
-import { doc, onSnapshot, type DocumentData } from 'firebase/firestore'
-import { db } from './firebase'
+type DocumentData = Record<string, unknown>
 
 export type AccessRole = 'admin' | 'collaborator'
 
@@ -23,13 +21,4 @@ export function isAllowedAdmin(record: AdminUserAccess | DocumentData | null | u
   return accessRoleFor(record, emailVerified) === 'admin'
 }
 
-export function subscribeToAccessRole(user: User, listener: (role: AccessRole | null, error?: Error) => void) {
-  const email = normalizeEmail(user.email)
-  if (!email || !user.emailVerified) {
-    listener(null)
-    return () => undefined
-  }
-  return onSnapshot(doc(db, 'adminUsers', email), (snapshot) => {
-    listener(accessRoleFor(snapshot.exists() ? snapshot.data() : null, user.emailVerified))
-  }, (error) => listener(null, error))
-}
+// Live role lookups are backend-specific; see data/ (subscribeAccessRole).

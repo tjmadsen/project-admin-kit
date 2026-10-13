@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
-import { collection, doc, limit, onSnapshot, orderBy, query } from 'firebase/firestore'
-import { db } from '../lib/firebase'
+import { subscribeDoc, subscribeQuery } from '../data'
 import { DEFAULT_DEPLOY_AGENT } from '../lib/agents'
 import type { AgentLoopConfig, AgentLoopRun, AgentLoopUsage, AgentLoopUsageEntry, AgentMachine } from '../lib/types'
 
@@ -10,9 +9,9 @@ export type LoopUsage = AgentLoopUsage & Record<string, AgentLoopUsageEntry | nu
 export function useLoopRuns(max = 100) {
   const [runs, setRuns] = useState<AgentLoopRun[]>([])
   const [error, setError] = useState('')
-  useEffect(() => onSnapshot(
-    query(collection(db, 'agentLoopRuns'), orderBy('startedAt', 'desc'), limit(max)),
-    (snapshot) => { setRuns(snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as AgentLoopRun)); setError('') },
+  useEffect(() => subscribeQuery(
+    { collection: 'agentLoopRuns', orderBy: 'startedAt', direction: 'desc', limit: max },
+    (rows) => { setRuns(rows as unknown as AgentLoopRun[]); setError('') },
     (err) => setError(err.message),
   ), [max])
   return { runs, error }
@@ -21,8 +20,8 @@ export function useLoopRuns(max = 100) {
 export function useMachines() {
   const [machines, setMachines] = useState<AgentMachine[]>([])
   const [error, setError] = useState('')
-  useEffect(() => onSnapshot(collection(db, 'agentMachines'),
-    (snapshot) => { setMachines(snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as AgentMachine)); setError('') },
+  useEffect(() => subscribeQuery({ collection: 'agentMachines' },
+    (rows) => { setMachines(rows as unknown as AgentMachine[]); setError('') },
     (err) => setError(err.message),
   ), [])
   return { machines, error }
@@ -31,9 +30,9 @@ export function useMachines() {
 export function useLoopConfig() {
   const [config, setConfig] = useState<AgentLoopConfig>({ deployAgent: DEFAULT_DEPLOY_AGENT })
   const [error, setError] = useState('')
-  useEffect(() => onSnapshot(doc(db, 'system', 'agentLoopConfig'),
-    (snapshot) => {
-      const value = snapshot.data() as Partial<AgentLoopConfig> | undefined
+  useEffect(() => subscribeDoc('system', 'agentLoopConfig',
+    (data) => {
+      const value = data as Partial<AgentLoopConfig> | undefined
       setConfig({ deployAgent: value?.deployAgent || DEFAULT_DEPLOY_AGENT, updatedAt: value?.updatedAt })
       setError('')
     },
@@ -45,9 +44,9 @@ export function useLoopConfig() {
 export function useLoopUsage() {
   const [usage, setUsage] = useState<LoopUsage>({ claude: null, codex: null })
   const [error, setError] = useState('')
-  useEffect(() => onSnapshot(doc(db, 'system', 'agentLoopUsage'),
-    (snapshot) => {
-      const value = snapshot.data() as Partial<LoopUsage> | undefined
+  useEffect(() => subscribeDoc('system', 'agentLoopUsage',
+    (data) => {
+      const value = data as Partial<LoopUsage> | undefined
       setUsage({ ...value, claude: value?.claude || null, codex: value?.codex || null })
       setError('')
     },

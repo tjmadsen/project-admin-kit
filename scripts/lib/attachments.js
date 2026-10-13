@@ -10,7 +10,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { loadProjectConfig } = require('./project-config');
 
-const BUCKET = process.env.PROJECT_ADMIN_STORAGE_BUCKET || loadProjectConfig().firebase.storageBucket;
+// Firebase Storage is the firestore backend's attachment store; the local
+// backend copies files beside its JSON store (lib/store/local-store.js).
+const BUCKET = process.env.PROJECT_ADMIN_STORAGE_BUCKET || loadProjectConfig().firebase?.storageBucket || '';
 const MAX_ATTACHMENT_COUNT = 10;
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const CONTENT_TYPES = Object.freeze({

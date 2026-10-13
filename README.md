@@ -7,9 +7,12 @@ fresh-context coding-agent loops, run monitoring, human approval gates, and
 auditable releases.
 
 It is a starter repository rather than only a UI package because the useful
-system crosses six boundaries: React, Firebase security, Firestore data,
-headless CLI agents, loop scheduling (launchd, systemd, cron, or a portable
-foreground scheduler), and deployment runbooks. Clone or use it
+system crosses six boundaries: React, access control, backlog data, headless
+CLI agents, loop scheduling (launchd, systemd, cron, or a portable foreground
+scheduler), and deployment runbooks. The backlog store is pluggable: Firestore
+(default, multi-user dashboard), a local JSON file (single user, no cloud
+account), or GitHub Issues (no dashboard); see
+[docs/BACKENDS.md](docs/BACKENDS.md). Clone or use it
 as a GitHub template for each product, then keep the app's own code in the same
 repository so isolated agent worktrees and PR release proofs remain coherent.
 
@@ -24,7 +27,8 @@ repository so isolated agent worktrees and PR release proofs remain coherent.
 - Agent-loop cards, provider usage, machine health, live progress, run history,
   stale-run recovery, and deploy-model selection.
 - Firestore and Storage rules plus emulator tests.
-- Firestore backlog CLIs and configurable loop agents: Codex, Claude, and Grok
+- Backlog CLIs over a pluggable store (Firestore, local file, or GitHub
+  Issues) and configurable loop agents: Codex, Claude, and Grok
   runner adapters out of the box, plus a generic `command` runner for any other
   CLI (`agents` in `project-admin.config.json`).
 - Human-gated Firebase Hosting, Functions, rules/indexes, Vercel, Flutter web,
@@ -57,6 +61,10 @@ npm run test:rules
 npm run build
 firebase deploy --only hosting,firestore:rules,firestore:indexes,storage --project my-new-app-prod
 ```
+
+Without Firebase, use `npm run configure -- --backend local ...` (then
+`npm run bootstrap-admin`, `npm run build`, `npm run local`) or
+`--backend github`; [docs/BACKENDS.md](docs/BACKENDS.md) has both setups.
 
 In Firebase Console, enable Google authentication and add the production domain
 to authorized domains. The bootstrap command creates the owner access record,

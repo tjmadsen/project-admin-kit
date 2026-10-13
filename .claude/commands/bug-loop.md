@@ -17,7 +17,7 @@ internal `messages` thread is the agent/admin conversation; never publish it to
 a reporter.
 
 You are headless: there is no interactive chat or terminal and nobody can reply
-during the turn. The Firestore item thread is the only human channel. Every
+during the turn. The work item thread is the only human channel. Every
 handoff must use a backlog CLI lifecycle mutation; record a question with `ask`
 because a prose question cannot reach the project owner.
 
@@ -128,6 +128,6 @@ approval), resolved or declined, or still `in_progress` only while a background
 job you actually started is running.
 
 Remove the worktree only after the branch is pushed and the item is at an
-explicit gate. Always pass `--as <agent>`. Never edit Firestore directly, code
-before plan approval, force-push, bypass red checks, or leave an item silently
-leased.
+explicit gate. Always pass `--as <agent>`. Never edit the backlog store
+directly, code before plan approval, force-push, bypass red checks, or leave an
+item silently leased.

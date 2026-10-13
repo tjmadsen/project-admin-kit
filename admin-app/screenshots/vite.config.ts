@@ -13,6 +13,8 @@ export default defineConfig({
   root: here,
   base: '/',
   plugins: [react()],
+  // The harness renders the firestore console against fixture-backed mocks.
+  define: { __PA_BACKEND__: JSON.stringify('firestore') },
   logLevel: 'warn',
   resolve: {
     alias: [
