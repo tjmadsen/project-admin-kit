@@ -1,6 +1,6 @@
 'use strict';
 
-const { collectionForRun } = require('./run-claims');
+const { collectionForRun, runItemReference } = require('./run-claims');
 
 const CONFIRMATION_REQUEST_REASON = 'Worker requested confirmation instead of recording a lifecycle handoff';
 
@@ -75,7 +75,7 @@ async function handoffConfirmationRequest(runId, rawReason, rawOutput, dependenc
     }
     const item = itemSnapshot.data();
     if (!canCreateConfirmationHandoff(item, run, runId, rawReason)) return;
-    const reference = run.activeItem || `${collection === 'featureRequests' ? 'FR' : 'BUG'}-${item.number ?? '?'}`;
+    const reference = runItemReference(run, item);
     transaction.update(itemRef, {
       status: 'blocked',
       waitingOn: 'human',

@@ -18,9 +18,8 @@ import { deploymentLabel, formatRelative, gateLabel, itemRef, matchesItemReferen
 import { readPreference, writePreference } from '../lib/preferences'
 import { preferencePrefix, projectConfig } from '../lib/project-config'
 import type { Owner, Priority, ReviewGate, ThinkingEffort, WorkItem, WorkKind, WorkMessage } from '../lib/types'
+import { WORK_ITEMS_COLLECTION, completionCopy, counterFieldFor, declineCopy, isTerminalStatus, workKindOrFallback, workKindPath } from '../lib/work-kinds'
 
-const terminal: Record<WorkKind, string[]> = { feature: ['shipped', 'declined'], bug: ['closed', 'wont_fix'] }
-const collections: Record<WorkKind, string> = { feature: 'featureRequests', bug: 'bugs' }
 const priorityRank: Record<Priority, number> = { critical: 0, high: 1, medium: 2, low: 3 }
 type SortKey = 'priority' | 'updated' | 'created' | 'number'
 const sortKeys: SortKey[] = ['priority', 'updated', 'created', 'number']
@@ -204,7 +203,7 @@ export function deploymentApprovalIssue(item: Pick<WorkItem, 'prNumber' | 'prUrl
 export type CloseWithoutDeploymentMode = 'hidden' | 'direct' | 'confirm'
 
 export function closeWithoutDeploymentMode(item: Pick<WorkItem, 'kind' | 'status' | 'waitingOn' | 'deploymentTargets' | 'deploymentType' | 'deploymentApprovedTargets' | 'deploymentApprovedAt' | 'deploymentInProgressTarget'>): CloseWithoutDeploymentMode {
-  if (terminal[item.kind].includes(item.status)) return 'hidden'
+  if (isTerminalStatus(item)) return 'hidden'
   const approved = item.deploymentApprovedAt ? deploymentTargetsFor(item, true).filter((target) => target !== 'none') : []
   const planned = deploymentTargetsFor(item).filter((target) => target !== 'none')
   const releasePending = approved.length > 0 || planned.length > 0 || item.waitingOn === 'deployer' || Boolean(item.deploymentInProgressTarget)
@@ -283,13 +282,14 @@ function replaceLocationItem(reference: string | null) {
 }
 
 export default function WorkItems({ kind, canManage, actorEmail, actorName = canManage ? projectConfig.admin.ownerName : projectConfig.admin.defaultCollaboratorName }: { kind: WorkKind; canManage: boolean; actorEmail: string; actorName?: string }) {
-  const primaryCollection = useCollection<WorkItem>(collections[kind])
-  const relatedCollection = useCollection<WorkItem>(collections[kind === 'feature' ? 'bug' : 'feature'])
-  const { data } = primaryCollection
+  // Every kind shares one collection; this page lists its own kind while
+  // dependencies and references resolve against all of them.
+  const workItems = useCollection<WorkItem>(WORK_ITEMS_COLLECTION, 500)
+  const allItems = workItems.data
+  const data = useMemo(() => allItems.filter((item) => item.kind === kind), [allItems, kind])
+  const definition = workKindOrFallback(kind)
   const { runs } = useLoopRuns(150)
-  const loading = primaryCollection.loading || relatedCollection.loading
-  const error = primaryCollection.error || relatedCollection.error
-  const allItems = useMemo(() => [...new Map([...relatedCollection.data, ...data].map((item) => [item.id, item])).values()], [data, relatedCollection.data])
+  const { loading, error } = workItems
   const initialSort = initialSortPreference(kind)
   const [queryText, setQueryText] = useState('')
   const [filter, setFilter] = useState('human')
@@ -309,7 +309,7 @@ export default function WorkItems({ kind, canManage, actorEmail, actorName = can
   const toastTimer = useRef<number | null>(null)
   const returnAnimationTimer = useRef<number | null>(null)
   const suppressDesktopAutoSelect = useRef(false)
-  const label = kind === 'feature' ? 'Feature Requests' : 'Bugs'
+  const label = definition.pluralLabel
   const filtered = useMemo(() => sortWorkItems(data.filter((item) => {
     const matchesText = `${item.title} ${item.description} ${item.number}`.toLowerCase().includes(queryText.toLowerCase())
     return matchesText && matchesFilter(item, filter) && (ownerFilter === 'all' || item.assignedTo === ownerFilter)
@@ -318,7 +318,7 @@ export default function WorkItems({ kind, canManage, actorEmail, actorName = can
   const filterValues = ['human', 'agent', 'deployer', 'all']
   const filterCounts = useMemo(() => Object.fromEntries(filterValues.map((value) => [value, data.filter((item) => matchesFilter(item, value)).length])), [data, kind])
   const upNext = useMemo(() => {
-    const eligible = sortWorkItems(data.filter((item) => item.waitingOn === 'agent' && !terminal[kind].includes(item.status) && isLeaseOpen(item) && blockingDependencies(item, allItems).length === 0), 'priority', 'asc')
+    const eligible = sortWorkItems(data.filter((item) => item.waitingOn === 'agent' && !isTerminalStatus(item) && isLeaseOpen(item) && blockingDependencies(item, allItems).length === 0), 'priority', 'asc')
     return AGENT_MODELS.map((agent) => ({
       agent,
       items: eligible.filter((item) => item.assignedTo === agent.owner || (agent.claimsUnassigned && !item.assignedTo)).slice(0, 3),
@@ -366,7 +366,7 @@ export default function WorkItems({ kind, canManage, actorEmail, actorName = can
     if (!isDesktopWorkList()) savedListScrollTop.current = listScrollRef.current?.scrollTop ?? 0
     suppressDesktopAutoSelect.current = false
     if (item.kind !== kind) {
-      window.location.assign(`${item.kind === 'feature' ? '/features' : '/bugs'}?item=${encodeURIComponent(itemRef(item.kind, item.number))}`)
+      window.location.assign(`${workKindPath(workKindOrFallback(item.kind))}?item=${encodeURIComponent(itemRef(item.kind, item.number))}`)
       return
     }
     openItem(item)
@@ -425,7 +425,7 @@ export default function WorkItems({ kind, canManage, actorEmail, actorName = can
   useRegisterDetailBack(Boolean(selected), returnToList)
 
   return <div className={`work-page ${selected ? 'has-selection' : ''}`}>
-    <PageHeader eyebrow={kind === 'feature' ? 'Product backlog' : 'Triage queue'} title={label} description={canManage ? (kind === 'feature' ? 'Shape, assign, and ship the next useful improvements.' : 'Capture defects, approve repair plans, and follow fixes to production.') : (kind === 'feature' ? 'Submit ideas and follow their progress.' : 'Report defects and follow their progress.')} action={<button className="button primary" onClick={() => setCreating(true)}>＋ New {kind === 'feature' ? 'request' : 'bug'}</button>} />
+    <PageHeader eyebrow={definition.copy.eyebrow} title={label} description={canManage ? definition.copy.adminDescription : definition.copy.collaboratorDescription} action={<button className="button primary" onClick={() => setCreating(true)}>＋ New {definition.copy.createLabel}</button>} />
     {error && <div className="error-banner">{error}</div>}
     <div className={`work-split ${selected ? 'has-selection' : ''} ${returningToList ? 'returning-to-list' : ''}`}>
       <section className="panel work-list-pane">
@@ -450,7 +450,7 @@ export default function WorkItems({ kind, canManage, actorEmail, actorName = can
           </div>})}
         </div>
       </section>
-      <section className="panel work-detail-pane">{selected ? <ItemDetail key={selected.id} item={selected} allItems={allItems} runs={runs} unreadAtOpen={selectedUnreadCount} canManage={canManage} actorEmail={actorEmail} actorName={actorName} onBack={returnToList} onDone={handleDone} onSelectItem={selectItem} /> : <EmptyState title={`Select a ${kind === 'feature' ? 'feature request' : 'bug'}`} copy={canManage ? 'Its full history, routing, delivery fields, and actions will stay visible here.' : 'Its full history and AI conversation will stay visible here.'} />}</section>
+      <section className="panel work-detail-pane">{selected ? <ItemDetail key={selected.id} item={selected} allItems={allItems} runs={runs} unreadAtOpen={selectedUnreadCount} canManage={canManage} actorEmail={actorEmail} actorName={actorName} onBack={returnToList} onDone={handleDone} onSelectItem={selectItem} /> : <EmptyState title={`Select a ${definition.label.toLowerCase()}`} copy={canManage ? 'Its full history, routing, delivery fields, and actions will stay visible here.' : 'Its full history and AI conversation will stay visible here.'} />}</section>
     </div>
     {toast && <div className="work-completion-toast" role="status"><span>{toast}</span><button type="button" onClick={() => setToast(null)}>Stay</button></div>}
     {creating && <NewItem kind={kind} canManage={canManage} actorEmail={actorEmail} onClose={() => setCreating(false)} onCreated={(id) => { setCreating(false); setSelectedId(id); setRequestedItem(id); replaceLocationItem(id) }} />}
@@ -468,7 +468,8 @@ function NewItem({ kind, canManage, actorEmail, onClose, onCreated }: { kind: Wo
   const [attachmentError, setAttachmentError] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [draftId] = useState(() => doc(collectionRef(kind)).id)
+  const definition = workKindOrFallback(kind)
+  const [draftId] = useState(() => doc(collection(db, WORK_ITEMS_COLLECTION)).id)
   const addAttachments = (incoming: File[]) => setAttachments((current) => {
     const merged = mergeAttachmentFiles(current, incoming)
     setAttachmentError(merged.error)
@@ -485,16 +486,16 @@ function NewItem({ kind, canManage, actorEmail, onClose, onCreated }: { kind: Wo
     let uploaded: UploadedAttachments | undefined
     try {
       uploaded = await uploadWorkAttachments(attachments, kind, draftId, actorEmail)
-      const itemDoc = doc(db, collections[kind], draftId)
+      const itemDoc = doc(db, WORK_ITEMS_COLLECTION, draftId)
       await runTransaction(db, async (transaction) => {
         const counterRef = doc(db, 'system', 'counters')
         const counter = await transaction.get(counterRef)
-        const field = kind === 'feature' ? 'nextFeatureNumber' : 'nextBugNumber'
+        const field = counterFieldFor(kind)
         const number = Number(counter.data()?.[field] ?? 0) + 1
         transaction.set(counterRef, { [field]: number, updatedAt: serverTimestamp() }, { merge: true })
         transaction.set(itemDoc, {
           kind, number, title: title.trim(), description: description.trim(), imageUrls: uploaded?.urls || [], priority,
-          status: kind === 'feature' ? 'backlog' : 'open', waitingOn: canManage && routeNow ? 'agent' : 'human', blockedReason: canManage && routeNow ? null : 'triage', assignedTo: owner,
+          status: definition.statuses.initial, waitingOn: canManage && routeNow ? 'agent' : 'human', blockedReason: canManage && routeNow ? null : 'triage', assignedTo: owner,
           thinkingEffort: effort, targetMachine: projectConfig.automation.defaultMachineId, deploymentType: 'none', deploymentTargets: [], messages: [],
           createdByEmail: actorEmail.toLowerCase(), createdByRole: canManage ? 'admin' : 'collaborator', createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
         })
@@ -507,7 +508,7 @@ function NewItem({ kind, canManage, actorEmail, onClose, onCreated }: { kind: Wo
     }
   }
 
-  return <Modal title={`New ${kind === 'feature' ? 'feature request' : 'bug'}`} onClose={saving ? () => undefined : onClose}>
+  return <Modal title={`New ${definition.label.toLowerCase()}`} onClose={saving ? () => undefined : onClose}>
     <form className="form-stack" onSubmit={submit}>
       <label>Title<input required autoFocus value={title} onChange={(event) => setTitle(event.target.value)} /></label>
       <label>Description<textarea required rows={6} value={description} onPaste={handlePaste} onChange={(event) => setDescription(event.target.value)} placeholder="Describe the goal or problem. You can paste supported attachments here." /></label>
@@ -549,12 +550,15 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
   const previousMessageCountRef = useRef(groupThreadMessages(item.messages || []).length)
   const wasNearBottomRef = useRef(true)
   const isPhoneLayout = usePhoneDetailLayout()
-  const itemDoc = doc(db, collections[item.kind], item.id)
-  const isTerminal = terminal[item.kind].includes(item.status)
-  // FR-20's tokenizer runs on the text nodes Markdown exposes, so FR-N/BUG-N
-  // references and bare URLs stay navigable inside rendered bodies.
+  const itemDoc = doc(db, WORK_ITEMS_COLLECTION, item.id)
+  const definition = workKindOrFallback(item.kind)
+  const completion = completionCopy(definition)
+  const declining = declineCopy(definition)
+  const isTerminal = isTerminalStatus(item)
+  // FR-20's tokenizer runs on the text nodes Markdown exposes, so item
+  // references (FR-N, BUG-N, ...) and bare URLs stay navigable inside rendered bodies.
   const renderMarkdownText = useCallback((text: string) => <LinkifiedText text={text} items={allItems} onSelectItem={onSelectItem} />, [allItems, onSelectItem])
-  const baseStatus = item.kind === 'feature' ? 'backlog' : 'open'
+  const baseStatus = definition.statuses.initial
   const addAttachments = (incoming: File[]) => setAttachments((current) => {
     const merged = mergeAttachmentFiles(current, incoming)
     setAttachmentError(merged.error)
@@ -667,26 +671,24 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
   })
   const finish = () => {
     if (!acceptanceReady) { setError('Every approved deployment target needs verification evidence before acceptance.'); return false }
-    const changes = item.kind === 'feature'
-      ? { status: 'shipped', waitingOn: 'done', blockedReason: null, shippedAt: serverTimestamp(), deploymentAcceptedAt: serverTimestamp(), resolution: `Accepted by ${projectConfig.admin.ownerName} after deployment verification.`, leaseExpiresAt: null, claimedBy: null }
-      : { status: 'closed', waitingOn: 'done', blockedReason: null, resolvedAt: serverTimestamp(), deploymentAcceptedAt: serverTimestamp(), resolution: `Accepted by ${projectConfig.admin.ownerName} after deployment verification.`, leaseExpiresAt: null, claimedBy: null }
-    return patchAndFinish(changes, item.kind === 'feature' ? 'Marked shipped' : 'Resolved')
+    const changes = { status: definition.statuses.done, waitingOn: 'done', blockedReason: null, [definition.completedAtField]: serverTimestamp(), deploymentAcceptedAt: serverTimestamp(), resolution: `Accepted by ${projectConfig.admin.ownerName} after deployment verification.`, leaseExpiresAt: null, claimedBy: null }
+    return patchAndFinish(changes, completion.accepted)
   }
-  const decline = () => patchAndFinish({ status: item.kind === 'feature' ? 'declined' : 'wont_fix', waitingOn: 'done', blockedReason: null, leaseExpiresAt: null, claimedBy: null }, item.kind === 'feature' ? 'Declined' : "Won't fix")
+  const decline = () => patchAndFinish({ status: definition.statuses.declined, waitingOn: 'done', blockedReason: null, leaseExpiresAt: null, claimedBy: null }, declining.confirmation)
   const closeMode = closeWithoutDeploymentMode(item)
   const closeWithoutDeployment = async () => {
     const note = closeNote.trim()
     if (!note) { setError('Add a short resolution note first.'); return false }
     const changes = {
-      ...(item.kind === 'feature' ? { status: 'shipped', shippedAt: serverTimestamp() } : { status: 'closed', resolvedAt: serverTimestamp() }),
+      status: definition.statuses.done, [definition.completedAtField]: serverTimestamp(),
       waitingOn: 'done', blockedReason: null, resolution: note, leaseExpiresAt: null, claimedBy: null,
       messages: arrayUnion({ author: actorName, authorEmail: actorEmail.toLowerCase(), body: `Closed without deployment: ${note}`, imageUrls: [], createdAt: Timestamp.now() }),
     }
-    const done = await patchAndFinish(changes, item.kind === 'feature' ? 'Marked shipped' : 'Closed')
+    const done = await patchAndFinish(changes, completion.closed)
     if (done) { setClosing(false); setCloseNote('') }
     return done
   }
-  const reopen = () => patch(item.kind === 'feature' ? { status: baseStatus, waitingOn: 'human', blockedReason: 'triage', shippedAt: null, leaseExpiresAt: null, claimedBy: null } : { status: baseStatus, waitingOn: 'human', blockedReason: 'triage', resolvedAt: null, leaseExpiresAt: null, claimedBy: null })
+  const reopen = () => patch({ status: baseStatus, waitingOn: 'human', blockedReason: 'triage', [definition.completedAtField]: null, leaseExpiresAt: null, claimedBy: null })
   const resume = () => item.assignedTo ? sendToAgent() : patch({ status: baseStatus, waitingOn: 'human', blockedReason: 'triage', leaseExpiresAt: null, claimedBy: null })
   const copyReference = async () => {
     try { await navigator.clipboard.writeText(`${itemRef(item.kind, item.number)} — ${item.title}`); setCopied(true); window.setTimeout(() => setCopied(false), 1600) }
@@ -753,7 +755,7 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
   const humanAction = gate === 'deploy_approval'
     ? deployActionButton(`🚀 Approve ${deploymentSummary(item)} → deploy`)
     : gate === 'acceptance_review'
-      ? <button type="button" className="action success-action" disabled={busy || !acceptanceReady} title={!acceptanceReady ? 'Waiting for verification evidence from every approved target' : undefined} onClick={() => void finish()}>✓ Accept & {item.kind === 'feature' ? 'mark shipped' : 'resolve'}</button>
+      ? <button type="button" className="action success-action" disabled={busy || !acceptanceReady} title={!acceptanceReady ? 'Waiting for verification evidence from every approved target' : undefined} onClick={() => void finish()}>✓ Accept & {completion.accept}</button>
       : showApprove
         ? approveButton('action primary-action')
         : <button type="button" className="action primary-action" disabled={busy || !item.assignedTo} title={!item.assignedTo ? 'Select an agent model first' : undefined} onClick={() => void sendToAgent()}>{gate === 'plan_review' ? '✓ Approve plan' : gate === 'pr_review' ? '✓ Approve PR' : gate === 'question' ? '↩ Return with answer' : '✓ Route'} → {ownerLabel(item.assignedTo)}</button>
@@ -776,10 +778,12 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
   const returnToAgentHint = item.assignedTo ? 'Return this item to the assigned agent for another implementation pass.' : 'Select an agent model first.'
   const actionBar = canManage ? <>
     {primaryAction}
-    {!isTerminal && !deployIsPrimary && deployActionButton('🚀 Approve & send to deploy')}
+    {!isTerminal && !deployIsPrimary && (definition.deploys
+      ? deployActionButton('🚀 Approve & send to deploy')
+      : closeMode !== 'hidden' && <button type="button" className="action success-action" disabled={busy} title="This kind never deploys; close it once the PR is merged or the result is recorded." onClick={() => setClosing(true)}>✓ Mark {completion.verb}</button>)}
     {!isTerminal && gate === 'acceptance_review' && <button type="button" className="action warning-action" disabled={busy || !item.assignedTo} title={returnToAgentHint} onClick={() => void sendToAgent()}>↩ Request changes</button>}
     {!isTerminal && item.waitingOn !== 'hold' && <button type="button" className="action hold-action" disabled={busy} title="Pause agent and deployment work for this item." onClick={() => void patchAndFinish({ waitingOn: 'hold', leaseExpiresAt: null, claimedBy: null }, 'Put on hold')}>⏸ Hold</button>}
-    {!isTerminal && <button type="button" className="action danger-action" disabled={busy} title={item.kind === 'feature' ? 'Decline this feature request.' : 'Close this bug as won\'t fix.'} onClick={() => void decline()}>{item.kind === 'feature' ? 'Decline' : "Won't fix"}</button>}
+    {!isTerminal && <button type="button" className="action danger-action" disabled={busy} title={declining.title} onClick={() => void decline()}>{declining.action}</button>}
     <details className="action-menu"><summary className="action quiet-action" role="button">Utilities ▾</summary><div>
       <button type="button" disabled={busy} onClick={() => void copyReference()}>{copied ? '✓ Copied' : '⧉ Copy reference'}</button>
       {!isTerminal && closeMode !== 'hidden' && <button type="button" disabled={busy} onClick={() => setClosing(true)}>✓ Mark done (no deployment)</button>}
@@ -825,15 +829,17 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
 
       <WorkItemDependencies item={item} allItems={allItems} canManage={canManage} disabled={busy} onChange={(dependsOn) => void patch({ dependsOn })} onSelectItem={onSelectItem} />
 
-      <details className="delivery-card" ref={deliveryCardRef} open><summary role="button"><span><span className="eyebrow">Delivery</span><strong>PR and deploy handoff</strong></span><small>{deliverySummary} · {deploymentSummary(item)}</small></summary><div className="delivery-grid">
+      <details className="delivery-card" ref={deliveryCardRef} open><summary role="button"><span><span className="eyebrow">Delivery</span><strong>{definition.deploys ? 'PR and deploy handoff' : 'PR handoff'}</strong></span><small>{deliverySummary} · {definition.deploys ? deploymentSummary(item) : 'No deploy'}</small></summary><div className="delivery-grid">
         {canManage ? <>
           <label>PR URL<input aria-label="PR URL" placeholder="https://github.com/…" value={prUrl} onChange={(event) => setPrUrl(event.target.value)} onBlur={() => saveText('prUrl', prUrl, item.prUrl)} /></label>
-          <label>Branch<input aria-label="Branch" placeholder="agent/fr-N" value={branchName} onChange={(event) => setBranchName(event.target.value)} onBlur={() => saveText('branchName', branchName, item.branchName)} /></label>
+          <label>Branch<input aria-label="Branch" placeholder={`agent/${definition.prefix.toLowerCase()}-N`} value={branchName} onChange={(event) => setBranchName(event.target.value)} onBlur={() => saveText('branchName', branchName, item.branchName)} /></label>
+          {definition.deploys && <>
           <DeploymentTargetPicker value={plannedDeploymentTargets} disabled={busy || item.waitingOn === 'deployer'} onChange={(targets) => void updateDeploymentTargets(targets)} />
           <label className="wide-field">Deploy notes<textarea aria-label="Deploy notes" rows={6} placeholder={'Scope: What must be released and why\nCommands: Exact release commands/order\nVerification: Target-specific checks and URLs\nAcceptance: Observable FR/bug behavior that must work'} value={deploymentNotes} onChange={(event) => setDeploymentNotes(event.target.value)} onBlur={saveDeploymentNotes} /></label>
           {deployApprovalHint && <p className="deployment-handoff-hint wide-field" id={deployHandoffHintId}>{deployApprovalHint}</p>}
+          </>}
         </> : <>
-          <ReadonlyField label="PR URL" value={item.prUrl || 'Not linked'} /><ReadonlyField label="Branch" value={item.branchName || 'Not assigned'} /><ReadonlyField label="Deployment" value={deploymentSummary(item)} />
+          <ReadonlyField label="PR URL" value={item.prUrl || 'Not linked'} /><ReadonlyField label="Branch" value={item.branchName || 'Not assigned'} /><ReadonlyField label="Deployment" value={definition.deploys ? deploymentSummary(item) : 'No deploy'} />
           {item.deploymentNotes && <div className="wide-field"><ReadonlyField label="Deploy notes" value={item.deploymentNotes} markdown /></div>}
         </>}
         {plannedDeploymentTargets.length > 0 && <div className="deployment-checklist wide-field"><span>Verification evidence</span>{plannedDeploymentTargets.map((target) => {
@@ -879,9 +885,9 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
     {closing && <Modal title={`Mark ${itemRef(item.kind, item.number)} done without a deployment`} onClose={busy ? () => undefined : () => setClosing(false)}>
       <form className="form-stack" onSubmit={(event) => { event.preventDefault(); void closeWithoutDeployment() }}>
         {closeMode === 'confirm' && <p className="form-error">This item still has a release scope: {deploymentSummary(item, Boolean(item.deploymentApprovedAt))}. Marking it done skips that release and nothing will be deployed.</p>}
-        <p className="muted">Marks {itemRef(item.kind, item.number)} {item.kind === 'feature' ? 'shipped' : 'closed'} with your note in the thread and no deployment proof. Use it for audits, research, docs-only changes, duplicates, or work verified by hand.</p>
+        <p className="muted">Marks {itemRef(item.kind, item.number)} {completion.verb} with your note in the thread and no deployment proof. Use it for audits, research, docs-only changes, duplicates, or work verified by hand.</p>
         <label>Resolution note<textarea required autoFocus rows={3} value={closeNote} onChange={(event) => setCloseNote(event.target.value)} placeholder="How was this completed without a release?" /></label>
-        <div className="form-actions"><button type="button" className="button secondary" onClick={() => setClosing(false)} disabled={busy}>Cancel</button><button className="button primary" disabled={busy || !closeNote.trim()}>{closeMode === 'confirm' ? 'Skip release & mark done' : `Mark ${item.kind === 'feature' ? 'shipped' : 'closed'}`}</button></div>
+        <div className="form-actions"><button type="button" className="button secondary" onClick={() => setClosing(false)} disabled={busy}>Cancel</button><button className="button primary" disabled={busy || !closeNote.trim()}>{closeMode === 'confirm' ? 'Skip release & mark done' : `Mark ${completion.verb}`}</button></div>
       </form>
     </Modal>}
   </div>
@@ -903,7 +909,6 @@ function DeploymentTargetPicker({ value, disabled, onChange }: { value: string[]
 function ReadonlyField({ label, value, markdown = false }: { label: string; value: string; markdown?: boolean }) {
   return <div className="readonly-field"><span>{label}</span>{markdown ? <div className="readonly-value"><Markdown source={value} /></div> : <strong>{value}</strong>}</div>
 }
-function collectionRef(kind: WorkKind) { return collection(db, collections[kind]) }
 
 function OwnerSelect({ value, onChange }: { value: Owner; onChange: (value: Owner) => void }) {
   const legacy = value && !AGENT_MODELS.some((agent) => agent.owner === value)

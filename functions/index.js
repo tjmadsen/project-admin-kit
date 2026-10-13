@@ -128,7 +128,8 @@ function lifecycleHandler(collectionId) {
     const notification = buildNotification({
       before,
       after,
-      collectionId,
+      kind: after?.kind || before?.kind,
+      workKinds: projectConfig.workKinds,
       adminEmail: adminEmail.value(),
       adminEmails,
       adminBaseUrl: adminBaseUrl.value(),
@@ -145,11 +146,9 @@ const triggerOptions = {
   secrets: [emailUser, emailPass],
 };
 
-exports.notifyFeatureLifecycle = onDocumentWritten(
-  { ...triggerOptions, document: 'featureRequests/{itemId}' },
-  lifecycleHandler('featureRequests'),
-);
-exports.notifyBugLifecycle = onDocumentWritten(
-  { ...triggerOptions, document: 'bugs/{itemId}' },
-  lifecycleHandler('bugs'),
+// One trigger covers every configured work kind; labels and routes come from
+// project-config.json#workKinds.
+exports.notifyWorkItemLifecycle = onDocumentWritten(
+  { ...triggerOptions, document: 'workItems/{itemId}' },
+  lifecycleHandler('workItems'),
 );

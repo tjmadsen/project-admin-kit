@@ -14,20 +14,28 @@ struct AdminNotificationRoute: Equatable, Identifiable {
             url.user == nil,
             url.password == nil,
             url.fragment == nil,
-            ["features", "bugs"].map({ AdminConfiguration.current.adminURL.appending(path: $0).path }).contains(url.path),
+            let prefix = Self.referencePrefix(forPath: url.path),
             let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
             let reference = components.queryItems?.first(where: { $0.name == "item" })?.value,
-            Self.reference(reference, matchesPath: url.path)
+            Self.reference(reference, hasPrefix: prefix)
         else {
             return nil
         }
         self.url = url
     }
 
-    private static func reference(_ reference: String, matchesPath path: String) -> Bool {
-        let prefix = path.hasSuffix("/bugs") ? "BUG-" : "FR-"
-        guard reference.hasPrefix(prefix) else { return false }
-        let number = reference.dropFirst(prefix.count)
+    /// The reference prefix of the work kind whose admin route is `path`, if any.
+    private static func referencePrefix(forPath path: String) -> String? {
+        let configuration = AdminConfiguration.current
+        return configuration.resolvedWorkItemRoutes.first(where: { route, _ in
+            configuration.adminURL.appending(path: route).path == path
+        })?.value
+    }
+
+    private static func reference(_ reference: String, hasPrefix prefix: String) -> Bool {
+        let expected = prefix + "-"
+        guard reference.hasPrefix(expected) else { return false }
+        let number = reference.dropFirst(expected.count)
         return !number.isEmpty && number.allSatisfy(\.isNumber)
     }
 }

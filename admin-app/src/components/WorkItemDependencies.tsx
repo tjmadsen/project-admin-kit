@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { itemRef } from '../lib/format'
 import type { WorkItem } from '../lib/types'
+import { WORK_KINDS, workKind } from '../lib/work-kinds'
 
 export interface DependencyView {
   id: string
@@ -16,7 +17,9 @@ function workItemIndex(items: WorkItem[]) {
 }
 
 export function dependencyIsComplete(item?: WorkItem) {
-  return item?.kind === 'feature' ? item.status === 'shipped' : item?.kind === 'bug' && item.status === 'closed'
+  // Only the kind's done status (shipped, closed) satisfies a prerequisite.
+  const kind = workKind(item?.kind)
+  return Boolean(item && kind && item.status === kind.statuses.done)
 }
 
 export function blockingDependencies(item: WorkItem, allItems: WorkItem[]): DependencyView[] {
@@ -108,7 +111,7 @@ export default function WorkItemDependencies({ item, allItems, canManage, disabl
     <div className="dependency-heading"><div><p className="eyebrow">Scheduling</p><h3>Dependencies</h3></div>{blockers.length > 0 ? <strong>{dependencyWaitLabel(item, allItems)}</strong> : dependencies.length > 0 ? <strong className="ready">Prerequisites complete</strong> : null}</div>
     {dependencies.length > 0 ? <ul className="dependency-list">{dependencies.map((dependency) => <DependencyChip key={dependency.id} dependency={dependency} removable={canManage} disabled={disabled} onRemove={() => removeDependency(dependency.id)} onSelectItem={onSelectItem} />)}</ul> : <p className="muted">No prerequisites. This item can enter an agent queue immediately.</p>}
     {canManage && <div className="dependency-picker">
-      <label>Find a prerequisite<input aria-label="Find a prerequisite" placeholder="Search FR-7, BUG-2, or a title…" value={query} disabled={disabled} onChange={(event) => { setQuery(event.target.value); setWarning('') }} /></label>
+      <label>Find a prerequisite<input aria-label="Find a prerequisite" placeholder={`Search ${WORK_KINDS.slice(0, 2).map((kind, index) => `${kind.prefix}-${index === 0 ? 7 : 2}`).join(', ')}, or a title…`} value={query} disabled={disabled} onChange={(event) => { setQuery(event.target.value); setWarning('') }} /></label>
       {matches.length > 0 && <div className="dependency-results">{matches.map((candidate) => {
         const createsCycle = wouldCreateDependencyCycle(item.id, candidate.id, allItems)
         return <button type="button" key={candidate.id} disabled={disabled} onClick={() => addDependency(candidate)}><span><strong>{itemRef(candidate.kind, candidate.number)}</strong>{candidate.title}</span><small>{createsCycle ? 'Creates cycle' : statusLabel(candidate)}</small></button>

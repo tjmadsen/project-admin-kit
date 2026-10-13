@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { ROOT, CONFIG_PATH, loadProjectConfig } = require('./lib/project-config');
 const { normalizeRoster } = require('./lib/agent-roster');
+const { loadWorkKinds, queueNames, syncDerivedFiles } = require('./lib/work-kinds');
 
 const FLAG_PATHS = {
   name: ['project', 'name'], shortName: ['project', 'shortName'], slug: ['project', 'slug'],
@@ -91,9 +92,11 @@ function main() {
     label: config.automation.defaultMachineLabel,
     repoRoot: ROOT,
     agents: Object.keys(normalizeRoster(config).agents),
-    queues: ['feature', 'bug', 'deploy'],
+    queues: queueNames(loadWorkKinds(config)),
   }] });
   updateMarketingPage(config);
+  // Rules, Functions, and the iOS wrapper carry generated copies of workKinds.
+  syncDerivedFiles({ root: ROOT, kinds: loadWorkKinds(config) });
   console.log(`Configured ${config.project.name}. Next: npm run install:all, firebase login, then npm run bootstrap-admin.`);
 }
 

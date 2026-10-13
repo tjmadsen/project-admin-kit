@@ -27,6 +27,14 @@ function bug(id: string, number: number, title: string): WorkItem {
 }
 
 describe('LinkifiedText', () => {
+  it('links references for any configured kind prefix', () => {
+    const onSelectItem = vi.fn()
+    const task = { ...feature('task-4', 4, 'Rotate key'), kind: 'task' }
+    render(<LinkifiedText text="Blocked by TASK-4." items={[task]} onSelectItem={onSelectItem} />)
+    screen.getByRole('button', { name: 'TASK-4' }).click()
+    expect(onSelectItem).toHaveBeenCalledWith(task)
+  })
+
   it('linkifies bare URLs without item context', () => {
     const { container } = render(<LinkifiedText text="See https://example.com/docs for details." />)
     const link = screen.getByRole('link', { name: 'https://example.com/docs' })

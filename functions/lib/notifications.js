@@ -54,12 +54,23 @@ function hasNewDeploymentFailure(before, after) {
   return deploymentContext && failureContext;
 }
 
-function referenceFor(collectionId, item) {
-  return `${collectionId === 'bugs' ? 'BUG' : 'FR'}-${item.number ?? '?'}`;
+// Kind labels, prefixes, and routes come from project-config.json#workKinds,
+// which `npm run sync:work-kinds` generates from the root workKinds config.
+// The fallback mirrors the built-in feature + bug pair.
+const DEFAULT_WORK_KINDS = {
+  feature: { label: 'Feature request', prefix: 'FR', route: 'features' },
+  bug: { label: 'Bug', prefix: 'BUG', route: 'bugs' },
+};
+
+function kindDefinition(workKinds, kind) {
+  const definition = (workKinds || DEFAULT_WORK_KINDS)[kind];
+  if (definition) return definition;
+  const id = String(kind || 'item');
+  return { label: 'Work item', prefix: id.toUpperCase(), route: `${id}s` };
 }
 
-function kindFor(collectionId) {
-  return collectionId === 'bugs' ? 'bug' : 'feature';
+function referenceFor(definition, item) {
+  return `${definition.prefix}-${item.number ?? '?'}`;
 }
 
 function dedupeEmails(emails) {
@@ -84,8 +95,7 @@ function deploymentTypeFor(item) {
   return item?.deploymentType || null;
 }
 
-function itemUrl(adminBaseUrl, collectionId, reference, gate) {
-  const route = collectionId === 'bugs' ? 'bugs' : 'features';
+function itemUrl(adminBaseUrl, route, reference, gate) {
   const base = String(adminBaseUrl || 'https://example.com/admin').replace(/\/$/, '');
   const url = new URL(`${base}/${route}`);
   url.searchParams.set('item', reference);
@@ -97,9 +107,12 @@ function notificationIdFor(eventId, type) {
   return `${eventId}-${type}`.replace(/[^a-zA-Z0-9_-]/g, '-');
 }
 
-function buildNotification({ before, after, collectionId, adminEmail, adminEmails, adminBaseUrl, projectName = 'Project' }) {
+function buildNotification({ before, after, kind = after?.kind, workKinds, adminEmail, adminEmails, adminBaseUrl, projectName = 'Project' }) {
   if (!after) return null;
-  const reference = referenceFor(collectionId, after);
+  // The workItems migration copies legacy documents; those creates are not new work.
+  if (!before && after.migratedFrom) return null;
+  const definition = kindDefinition(workKinds, kind);
+  const reference = referenceFor(definition, after);
   const previousGate = effectiveGate(before);
   const gate = effectiveGate(after);
   const previousStatus = before?.status;
@@ -137,7 +150,8 @@ function buildNotification({ before, after, collectionId, adminEmail, adminEmail
   if (recipients.length === 0) return null;
   return {
     type,
-    kind: kindFor(collectionId),
+    kind,
+    kindLabel: definition.label,
     reference,
     gate: type === 'action_required' ? gate : null,
     recipients,
@@ -148,7 +162,7 @@ function buildNotification({ before, after, collectionId, adminEmail, adminEmail
     priority: after.priority || 'medium',
     owner: ownerLabel(after.assignedTo),
     latestUpdate: messageBody(after),
-    primaryUrl: itemUrl(adminBaseUrl, collectionId, reference, type === 'action_required' ? gate : null),
+    primaryUrl: itemUrl(adminBaseUrl, definition.route, reference, type === 'action_required' ? gate : null),
     prUrl: typeof after.prUrl === 'string' && /^https:\/\//i.test(after.prUrl) ? after.prUrl : null,
     deploymentType: deploymentTypeFor(after),
     deploymentBuild: after.deploymentBuild || null,
@@ -175,7 +189,7 @@ function renderEmail(notification) {
     notification.deploymentBuild ? `Build: ${notification.deploymentBuild}` : null,
   ].filter(Boolean);
   const text = [
-    notification.projectName,
+    notification.kindLabel ? `${notification.projectName} · ${notification.kindLabel}` : notification.projectName,
     '',
     `${notification.reference} — ${notification.title}`,
     notification.reason,
@@ -198,11 +212,12 @@ function renderEmail(notification) {
     notification.deploymentType ? `Release: ${notification.deploymentType.replaceAll('_', ' ')}` : null,
     notification.deploymentBuild ? `Build: ${notification.deploymentBuild}` : null,
   ].filter(Boolean).map((line) => `<span style="margin-right:18px">${escapeHtml(line)}</span>`).join('');
-  const html = `<!doctype html><html><body style="margin:0;background:#f3f6f4;color:#17231c;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"><div style="display:none;max-height:0;overflow:hidden">${escapeHtml(notification.reason)}</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td style="padding:32px 16px"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;margin:auto;background:#fff;border:1px solid #dce6df;border-radius:16px;overflow:hidden"><tr><td style="padding:24px 28px;background:#123d2c;color:#fff"><div style="font-size:13px;letter-spacing:.12em;text-transform:uppercase;opacity:.75">${escapeHtml(notification.projectName)}</div><h1 style="margin:8px 0 0;font-size:24px;line-height:1.25">${escapeHtml(notification.reference)} — ${escapeHtml(notification.title)}</h1></td></tr><tr><td style="padding:28px"><p style="margin:0 0 12px;font-size:17px;line-height:1.5"><strong>${escapeHtml(notification.reason)}</strong></p><p style="margin:0 0 24px;line-height:1.5">${escapeHtml(notification.action)}</p><a href="${escapeHtml(notification.primaryUrl)}" style="display:inline-block;padding:13px 20px;border-radius:8px;background:#1f7a50;color:#fff;text-decoration:none;font-weight:700">Open ${escapeHtml(notification.reference)} in ${escapeHtml(notification.projectName)} Admin</a><div style="margin:28px 0 0;padding:18px;background:#f3f6f4;border-radius:10px"><div style="margin-bottom:8px;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#557064">Newest update</div><div style="white-space:pre-wrap;line-height:1.5">${escapeHtml(update)}</div></div><p style="margin:18px 0 0;color:#557064;font-size:14px">Priority: <strong>${escapeHtml(notification.priority)}</strong> &nbsp; Owner: <strong>${escapeHtml(notification.owner)}</strong></p>${release ? `<p style="margin:8px 0 0;color:#557064;font-size:14px">${release}</p>` : ''}${secondary}</td></tr></table></td></tr></table></body></html>`;
+  const html = `<!doctype html><html><body style="margin:0;background:#f3f6f4;color:#17231c;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"><div style="display:none;max-height:0;overflow:hidden">${escapeHtml(notification.reason)}</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td style="padding:32px 16px"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;margin:auto;background:#fff;border:1px solid #dce6df;border-radius:16px;overflow:hidden"><tr><td style="padding:24px 28px;background:#123d2c;color:#fff"><div style="font-size:13px;letter-spacing:.12em;text-transform:uppercase;opacity:.75">${escapeHtml(notification.projectName)}${notification.kindLabel ? ` · ${escapeHtml(notification.kindLabel)}` : ''}</div><h1 style="margin:8px 0 0;font-size:24px;line-height:1.25">${escapeHtml(notification.reference)} — ${escapeHtml(notification.title)}</h1></td></tr><tr><td style="padding:28px"><p style="margin:0 0 12px;font-size:17px;line-height:1.5"><strong>${escapeHtml(notification.reason)}</strong></p><p style="margin:0 0 24px;line-height:1.5">${escapeHtml(notification.action)}</p><a href="${escapeHtml(notification.primaryUrl)}" style="display:inline-block;padding:13px 20px;border-radius:8px;background:#1f7a50;color:#fff;text-decoration:none;font-weight:700">Open ${escapeHtml(notification.reference)} in ${escapeHtml(notification.projectName)} Admin</a><div style="margin:28px 0 0;padding:18px;background:#f3f6f4;border-radius:10px"><div style="margin-bottom:8px;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#557064">Newest update</div><div style="white-space:pre-wrap;line-height:1.5">${escapeHtml(update)}</div></div><p style="margin:18px 0 0;color:#557064;font-size:14px">Priority: <strong>${escapeHtml(notification.priority)}</strong> &nbsp; Owner: <strong>${escapeHtml(notification.owner)}</strong></p>${release ? `<p style="margin:8px 0 0;color:#557064;font-size:14px">${release}</p>` : ''}${secondary}</td></tr></table></td></tr></table></body></html>`;
   return { text, html };
 }
 
 module.exports = {
+  DEFAULT_WORK_KINDS,
   buildNotification,
   effectiveGate,
   hasNewDeploymentFailure,

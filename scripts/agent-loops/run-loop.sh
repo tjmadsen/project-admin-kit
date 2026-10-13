@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fresh-context headless runner for Project Admin's feature, bug, and deploy queues.
+# Fresh-context headless runner for Project Admin's work-kind and deploy queues.
 set -euo pipefail
 
 REQUESTED_AGENT="${1:-}"
@@ -14,6 +14,7 @@ MACHINE_ID="${PROJECT_ADMIN_MACHINE_ID:-$DEFAULT_MACHINE_ID}"
 INTERVAL_SECONDS="${PROJECT_ADMIN_LOOP_INTERVAL_SECONDS:-1800}"
 PROGRESS_INTERVAL_SECONDS="${PROJECT_ADMIN_LOOP_PROGRESS_SECONDS:-900}"
 AGENTS_HELPER="$REPO_ROOT/scripts/lib/agents.js"
+WORK_KINDS_HELPER="$REPO_ROOT/scripts/lib/work-kinds.js"
 AUTH_ALERT_STAMP="${PROJECT_ADMIN_LOOP_AUTH_STAMP:-$HOME/$STATE_DIRECTORY/loop-auth-alert.stamp}"
 AUTH_ALERT_DEBOUNCE_SECONDS="${PROJECT_ADMIN_LOOP_AUTH_DEBOUNCE_SECONDS:-1800}"
 NOTIFIER="${PROJECT_ADMIN_LOOP_NOTIFIER:-osascript}"
@@ -42,11 +43,15 @@ fi
 usage() {
   local tokens
   tokens="$(node "$AGENTS_HELPER" tokens --separator '|' 2>/dev/null || true)"
-  echo "Usage: $0 <${tokens:-agent}|configured> <feature|bug|deploy> [--once|interval-seconds]" >&2
+  local queues
+  queues="$(node "$WORK_KINDS_HELPER" queues 2>/dev/null | paste -sd '|' - || true)"
+  echo "Usage: $0 <${tokens:-agent}|configured> <${queues:-queue}> [--once|interval-seconds]" >&2
   exit 2
 }
 
-[[ "$QUEUE_NAME" =~ ^(feature|bug|deploy)$ ]] || usage
+# Queues are the configured work kinds (project-admin.config.json `workKinds`)
+# plus `deploy`, which spans every kind that deploys.
+node "$WORK_KINDS_HELPER" queues 2>/dev/null | grep -qxF -- "$QUEUE_NAME" || usage
 [[ "$LOOP_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] || { echo "PROJECT_ADMIN_LOOP_TIMEOUT_SECONDS must be a positive integer" >&2; exit 2; }
 [[ "$PROGRESS_INTERVAL_SECONDS" =~ ^[1-9][0-9]*$ ]] || { echo "PROJECT_ADMIN_LOOP_PROGRESS_SECONDS must be a positive integer" >&2; exit 2; }
 if [[ "$REQUESTED_AGENT" == "configured" ]]; then
@@ -87,17 +92,11 @@ TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
 [[ -n "$TIMEOUT_BIN" ]] || { echo "timeout is required (brew install coreutils)" >&2; exit 1; }
 
 count_queue() {
-  if [[ "$QUEUE_NAME" == "feature" ]]; then
-    node "$REPO_ROOT/scripts/feature-agent.js" count --as "$AGENT_TOKEN"
-  elif [[ "$QUEUE_NAME" == "bug" ]]; then
-    node "$REPO_ROOT/scripts/bug-agent.js" count --as "$AGENT_TOKEN"
+  if [[ "$QUEUE_NAME" == "deploy" ]]; then
+    # Without --kind, deploy-count covers every kind whose items deploy.
+    node "$REPO_ROOT/scripts/work-agent.js" deploy-count --as "$AGENT_TOKEN"
   else
-    local feature_json bug_json feature_count bug_count
-    feature_json="$(node "$REPO_ROOT/scripts/feature-agent.js" deploy-count --as "$AGENT_TOKEN")"
-    bug_json="$(node "$REPO_ROOT/scripts/bug-agent.js" deploy-count --as "$AGENT_TOKEN")"
-    feature_count="$(node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).count))' <<<"$feature_json")"
-    bug_count="$(node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).count))' <<<"$bug_json")"
-    echo "{\"count\":$((feature_count + bug_count)),\"topThinkingEffort\":\"high\"}"
+    node "$REPO_ROOT/scripts/work-agent.js" --kind "$QUEUE_NAME" count --as "$AGENT_TOKEN"
   fi
 }
 

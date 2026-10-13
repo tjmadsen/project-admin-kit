@@ -6,7 +6,10 @@ import { DetailBackProvider, useDetailBack } from '../components/DetailBackConte
 import WorkItems, { APPROVAL_NOTE, canApproveAndReturn, closeWithoutDeploymentMode, deploymentApprovalIssue, deploymentNotesReady, deploymentSummary, effectiveGate, groupThreadMessages, lastMessagePreview, matchesItemReference, messageRole, parseSeenCounts, quickReplyDraft, stripMarkdown, syncPhoneDetailHeight, threadNearBottom, unreadMessageCount } from './WorkItems'
 
 const state = vi.hoisted(() => ({ data: [] as unknown[] }))
-const firestore = vi.hoisted(() => ({ updateDoc: vi.fn(async (_reference: unknown, _data: Record<string, unknown>) => undefined) }))
+const firestore = vi.hoisted(() => ({
+  updateDoc: vi.fn(async (_reference: unknown, _data: Record<string, unknown>) => undefined),
+  transactionSets: [] as Array<{ path: string; data: Record<string, unknown> }>,
+}))
 const scrollIntoView = vi.fn()
 const preferenceStore = new Map<string, string>()
 
@@ -23,6 +26,10 @@ vi.mock('firebase/firestore', async (importOriginal) => {
   return {
     ...actual,
     updateDoc: firestore.updateDoc,
+    runTransaction: async (_db: unknown, operation: (transaction: unknown) => Promise<unknown>) => operation({
+      get: async () => ({ data: () => ({ nextFeatureNumber: 30, nextBugNumber: 12 }) }),
+      set: (reference: { path: string }, data: Record<string, unknown>) => { firestore.transactionSets.push({ path: reference.path, data }) },
+    }),
     arrayUnion: (...values: unknown[]) => ({ arrayUnion: values }),
     serverTimestamp: () => 'server-timestamp',
   }
@@ -1239,5 +1246,59 @@ describe('one-tap approval', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add & return to agent' }))
     await waitFor(() => expect(firestore.updateDoc).toHaveBeenCalledTimes(1))
     expect(firestore.updateDoc.mock.calls[0][1]).toMatchObject({ waitingOn: 'agent', status: 'in_progress', blockedReason: null })
+  })
+})
+
+describe('a configured third work kind', () => {
+  const task: WorkItem = {
+    ...item, id: 'task-3', kind: 'task', number: 3, title: 'Rotate the staging key', status: 'in_review',
+    waitingOn: 'human', blockedReason: 'pr_review', assignedTo: 'sol-agent', deploymentType: 'none', deploymentTargets: [],
+    prUrl: 'https://github.com/example/project/pull/41', prNumber: 41,
+  }
+  const feature: WorkItem = { ...item, id: 'feature-9', number: 9, title: 'A feature in the same collection' }
+
+  it('lists only its own kind with configured labels, references, and no deploy handoff', async () => {
+    state.data = [task, feature]
+    window.history.replaceState({}, '', '/admin/tasks')
+    render(<WorkItems kind="task" canManage actorEmail="owner@example.com" />)
+    expect(screen.getByRole('heading', { name: 'Tasks' })).toBeInTheDocument()
+    expect(screen.getByText('Chores and research')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /New task/ })).toBeInTheDocument()
+    expect((await screen.findAllByText('TASK-3')).length).toBeGreaterThan(0)
+    expect(screen.queryByText('A feature in the same collection')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /send to deploy/i })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Deploy notes')).not.toBeInTheDocument()
+    expect(screen.getAllByText('PR handoff').length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('button', { name: 'Decline' }).length).toBeGreaterThan(0)
+  })
+
+  it('closes after review through the no-deploy path with the kind\'s done status', async () => {
+    state.data = [task]
+    window.history.replaceState({}, '', '/admin/tasks?item=TASK-3')
+    render(<WorkItems kind="task" canManage actorEmail="owner@example.com" />)
+    fireEvent.click((await screen.findAllByRole('button', { name: '✓ Mark closed' }))[0])
+    expect(screen.getByRole('dialog', { name: /Mark TASK-3 done without a deployment/i })).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Resolution note'), { target: { value: 'Merged PR #41; nothing to release.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Mark closed' }))
+    await waitFor(() => expect(firestore.updateDoc).toHaveBeenCalledTimes(1))
+    const payload = firestore.updateDoc.mock.calls[0][1] as Record<string, unknown>
+    expect(payload).toMatchObject({ status: 'closed', waitingOn: 'done', resolvedAt: 'server-timestamp' })
+    expect(payload).not.toHaveProperty('shippedAt')
+  })
+
+  it('creates the item in workItems with its kind, initial status, and own counter', async () => {
+    firestore.transactionSets.length = 0
+    state.data = []
+    render(<WorkItems kind="task" canManage actorEmail="owner@example.com" />)
+    fireEvent.click(screen.getByRole('button', { name: /New task/ }))
+    expect(screen.getByRole('dialog', { name: 'New task' })).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Prune stale branches' } })
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Delete merged agent branches older than 30 days.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create for review' }))
+    await waitFor(() => expect(firestore.transactionSets).toHaveLength(2))
+    const [counter, created] = firestore.transactionSets
+    expect(counter).toMatchObject({ path: 'system/counters', data: { nextTaskNumber: 1 } })
+    expect(created.path).toMatch(/^workItems\//)
+    expect(created.data).toMatchObject({ kind: 'task', number: 1, status: 'open', waitingOn: 'human', blockedReason: 'triage' })
   })
 })

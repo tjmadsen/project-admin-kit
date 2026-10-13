@@ -1,5 +1,22 @@
 {
   "projectName": "My Project",
   "ownerEmail": "owner@example.com",
-  "adminBaseUrl": "https://example.com/admin"
+  "adminBaseUrl": "https://example.com/admin",
+  "workKinds": {
+    "feature": {
+      "label": "Feature request",
+      "prefix": "FR",
+      "route": "features"
+    },
+    "bug": {
+      "label": "Bug",
+      "prefix": "BUG",
+      "route": "bugs"
+    },
+    "task": {
+      "label": "Task",
+      "prefix": "TASK",
+      "route": "tasks"
+    }
+  }
 }

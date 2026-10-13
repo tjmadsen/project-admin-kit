@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # launchd entry point for one headless loop iteration.
 #
-#   Usage: loop-wrapper.sh <agent-token|configured> <feature|bug|deploy>
+#   Usage: loop-wrapper.sh <agent-token|configured> <work-kind|deploy>
 #
 # Agent tokens come from project-admin.config.json `agents` (see
 # scripts/lib/agents.js); aliases are canonicalized so codex and terra share
@@ -21,14 +21,18 @@ set -uo pipefail
 
 TOKEN="${1:-}"
 QUEUE="${2:-}"
-AGENTS_HELPER="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/agents.js"
+LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)"
+AGENTS_HELPER="$LIB_DIR/agents.js"
+WORK_KINDS_HELPER="$LIB_DIR/work-kinds.js"
+usage() {
+  echo "Usage: $0 <$(node "$AGENTS_HELPER" tokens --separator '|' 2>/dev/null || echo agent)|configured> <$(node "$WORK_KINDS_HELPER" queues 2>/dev/null | paste -sd '|' - || echo queue)>" >&2
+  exit 2
+}
 if [[ "$TOKEN" != "configured" ]]; then
-  TOKEN="$(node "$AGENTS_HELPER" canonical "$TOKEN")" || {
-    echo "Usage: $0 <$(node "$AGENTS_HELPER" tokens --separator '|' 2>/dev/null || echo agent)|configured> <feature|bug|deploy>" >&2
-    exit 2
-  }
+  TOKEN="$(node "$AGENTS_HELPER" canonical "$TOKEN")" || usage
 fi
-case "$QUEUE" in feature|bug|deploy) ;; *) echo "Usage: $0 <sol|terra|luna|opus|sonnet|fable|grok|configured> <feature|bug|deploy>" >&2; exit 2 ;; esac
+# Queues are the configured work kinds plus `deploy`.
+node "$WORK_KINDS_HELPER" queues 2>/dev/null | grep -qxF -- "$QUEUE" || usage
 
 # QoS fix. Every loop plist sets ProcessType=Background, which on Apple Silicon
 # confines this process AND everything it spawns (run-loop.sh, the agent CLI,

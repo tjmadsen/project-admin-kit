@@ -9,11 +9,14 @@ import { THEME_LABELS, THEME_PREFERENCES, readTheme, writeTheme, type ThemePrefe
 import { useDetailBack } from './DetailBackContext'
 import ProjectMark from './ProjectMark'
 import { projectConfig } from '../lib/project-config'
+import { WORK_KINDS, workKindPath } from '../lib/work-kinds'
+
+// One navigation entry per configured work kind, in config order.
+const workKindNav = WORK_KINDS.map((kind) => ({ to: workKindPath(kind), label: kind.pluralLabel, icon: kind.icon }))
 
 const nav = [
   { to: '/', label: 'Dashboard', icon: 'grid' },
-  { to: '/features', label: 'Feature Requests', icon: 'spark' },
-  { to: '/bugs', label: 'Bugs', icon: 'bug' },
+  ...workKindNav,
   { to: '/loops', label: 'Agent Loops', icon: 'loop' },
   { to: '/activity', label: 'Activity', icon: 'pulse' },
   { to: '/users', label: 'Users', icon: 'users' },
@@ -24,6 +27,7 @@ const icons: Record<string, ReactNode> = {
   grid: <><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></>,
   spark: <path d="m12 3 1.6 5.4L19 10l-5.4 1.6L12 17l-1.6-5.4L5 10l5.4-1.6L12 3Z"/>,
   bug: <><path d="M8 9h8v7a4 4 0 0 1-8 0V9Z"/><path d="M10 9V7a2 2 0 0 1 4 0v2M4 13h4m8 0h4M5 18l3-1m8 0 3 1"/></>,
+  check: <><rect x="4" y="4" width="16" height="16" rx="3"/><path d="m8.5 12 2.5 2.5 4.5-5"/></>,
   loop: <><path d="M20 7h-9a5 5 0 0 0-5 5v1"/><path d="m17 4 3 3-3 3M4 17h9a5 5 0 0 0 5-5v-1"/><path d="m7 20-3-3 3-3"/></>,
   pulse: <path d="M3 12h4l2-7 4 14 2-7h6"/>,
   users: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></>,
@@ -41,7 +45,7 @@ export default function Layout({ user, role, children }: { user: User; role: Acc
   const [theme, setTheme] = useState<ThemePreference>(() => readTheme())
   const location = useLocation()
   const { isDetailOpen, goBack } = useDetailBack()
-  const collaboratorDestinations = new Set(['/features', '/bugs', '/loops', '/activity'])
+  const collaboratorDestinations = new Set([...workKindNav.map((item) => item.to), '/loops', '/activity'])
   const visibleNav = role === 'admin' ? nav : nav.filter((item) => collaboratorDestinations.has(item.to))
   const fallbackInitials = (user.displayName || user.email || projectConfig.project.shortName).split(/[\s@]+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('')
   const productionHost = (() => { try { return new URL(projectConfig.project.productionUrl).host } catch { return projectConfig.project.productionUrl } })()
@@ -108,7 +112,7 @@ export default function Layout({ user, role, children }: { user: User; role: Acc
             </NavLink>
           ))}
         </nav>
-        <div className="sidebar-status"><i /><span>{role === 'admin' ? 'Production' : 'Collaborator access'}</span><small>{role === 'admin' ? productionHost : 'Features · Bugs · Loops · Activity'}</small></div>
+        <div className="sidebar-status"><i /><span>{role === 'admin' ? 'Production' : 'Collaborator access'}</span><small>{role === 'admin' ? productionHost : [...WORK_KINDS.map((kind) => kind.shortLabel), 'Loops', 'Activity'].join(' · ')}</small></div>
         <div className="account">
           {user.photoURL ? <img src={user.photoURL} alt="" /> : <div className="avatar">{fallbackInitials}</div>}
           <div><strong>{user.displayName || user.email?.split('@')[0] || 'Collaborator'}</strong><span>{user.email}</span></div>

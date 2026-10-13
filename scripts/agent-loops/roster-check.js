@@ -21,7 +21,12 @@
 
 const path = require('path');
 
-const QUEUES = Object.freeze(['feature', 'bug', 'deploy']);
+// Work-kind queues come from config; `deploy` spans every deploying kind.
+// Loaded lazily so the plain check stays cheap when the roster rejects first.
+function configuredQueues() {
+  const { loadWorkKinds, queueNames } = require('../lib/work-kinds');
+  return queueNames(loadWorkKinds());
+}
 
 function machineEntry(roster, machineId) {
   const machines = (roster && roster.machines) || [];
@@ -37,8 +42,9 @@ function entitlements(roster, machineId, knownAgents) {
   const agents = (Array.isArray(machine.agents) ? machine.agents : [])
     .filter((agent) => !knownAgents || knownAgents.includes(agent));
   const pairs = [];
+  const valid = configuredQueues();
   for (const queue of queues) {
-    if (!QUEUES.includes(queue)) continue;
+    if (!valid.includes(queue)) continue;
     for (const agent of agents) pairs.push({ queue, agent });
   }
   return pairs;
@@ -81,4 +87,4 @@ if (require.main === module) {
   process.exit(isEntitled(roster, machineId, queue, agent, known) ? 0 : 1);
 }
 
-module.exports = { QUEUES, entitlements, agentsForMachine, isEntitled, unknownAgents };
+module.exports = { configuredQueues, entitlements, agentsForMachine, isEntitled, unknownAgents };

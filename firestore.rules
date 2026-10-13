@@ -53,31 +53,52 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
-    function collaboratorCounterAdvanceIsValid() {
-      let changed = request.resource.data.diff(resource.data).affectedKeys();
-      return changed.hasOnly(['nextFeatureNumber', 'nextBugNumber', 'updatedAt'])
-        && request.resource.data.updatedAt == request.time
-        && (
-          (request.resource.data.nextFeatureNumber == resource.data.nextFeatureNumber + 1
-            && request.resource.data.nextBugNumber == resource.data.nextBugNumber)
-          ||
-          (request.resource.data.nextBugNumber == resource.data.nextBugNumber + 1
-            && request.resource.data.nextFeatureNumber == resource.data.nextFeatureNumber)
-        );
+    // Work item kinds come from project-admin.config.json#workKinds. Rules cannot
+    // read that file, so the block below is generated; never edit it by hand.
+    // BEGIN GENERATED WORK KINDS: run `npm run sync:work-kinds` after editing workKinds.
+    function workKindInitialStatuses() {
+      return {'feature': 'backlog', 'bug': 'open', 'task': 'open'};
     }
 
-    function collaboratorSubmissionIsValid(kind) {
+    function workKindCounterFields() {
+      return {'feature': 'nextFeatureNumber', 'bug': 'nextBugNumber', 'task': 'nextTaskNumber'};
+    }
+
+    function collaboratorCounterAdvanceIsValid() {
+      return counterAdvancedByOne('nextFeatureNumber')
+        || counterAdvancedByOne('nextBugNumber')
+        || counterAdvancedByOne('nextTaskNumber');
+    }
+    // END GENERATED WORK KINDS
+
+    function workKindIsConfigured(kind) {
+      return kind is string && kind in workKindCounterFields();
+    }
+
+    // A collaborator advances exactly one kind's counter by one. A kind added
+    // after bootstrap has no counter field yet and starts from zero.
+    function counterAdvancedByOne(field) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return changed.hasOnly([field, 'updatedAt'])
+        && changed.hasAll([field])
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data[field] == resource.data.get(field, 0) + 1;
+    }
+
+    function collaboratorSubmissionIsValid() {
       let data = request.resource.data;
+      let kind = data.kind;
+      let counterField = workKindCounterFields()[kind];
       let counterBefore = get(/databases/$(database)/documents/system/counters).data;
       let counterAfter = getAfter(/databases/$(database)/documents/system/counters).data;
-      let expectedNumber = kind == 'feature' ? counterAfter.nextFeatureNumber : counterAfter.nextBugNumber;
-      let previousNumber = kind == 'feature' ? counterBefore.nextFeatureNumber : counterBefore.nextBugNumber;
+      let expectedNumber = counterAfter.get(counterField, 0);
+      let previousNumber = counterBefore.get(counterField, 0);
       return data.keys().hasOnly([
           'kind', 'number', 'title', 'description', 'imageUrls', 'priority', 'status', 'waitingOn', 'blockedReason',
           'assignedTo', 'thinkingEffort', 'targetMachine', 'deploymentType', 'deploymentTargets', 'messages',
           'createdByEmail', 'createdByRole', 'createdAt', 'updatedAt'
         ])
-        && data.kind == kind
+        && workKindIsConfigured(kind)
         && data.number is int
         && data.number == expectedNumber
         && expectedNumber == previousNumber + 1
@@ -85,7 +106,7 @@ service cloud.firestore {
         && data.description is string && data.description.size() > 0 && data.description.size() <= 10000
         && data.imageUrls is list && data.imageUrls.size() <= 10
         && data.priority in ['critical', 'high', 'medium', 'low']
-        && data.status == (kind == 'feature' ? 'backlog' : 'open')
+        && data.status == workKindInitialStatuses()[kind]
         && data.waitingOn == 'human'
         && data.blockedReason == 'triage'
         && data.assignedTo == projectSettings().defaultWorkOwner
@@ -151,19 +172,15 @@ service cloud.firestore {
       return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['dependsOn']);
     }
 
-    match /featureRequests/{itemId} {
+    // Every kind shares one collection. The kind is fixed at creation and must
+    // be a configured kind, for administrators as well as collaborators.
+    match /workItems/{itemId} {
       allow read: if isCollaborator();
-      allow create: if isAdmin() || (isCollaborator() && collaboratorSubmissionIsValid('feature'));
-      allow update: if isAdmin() || (isCollaborator() && collaboratorLeavesDependenciesUnchanged()
-        && (collaboratorPriorityUpdateIsValid() || collaboratorMessageIsValid()));
-      allow delete: if isAdmin();
-    }
-
-    match /bugs/{itemId} {
-      allow read: if isCollaborator();
-      allow create: if isAdmin() || (isCollaborator() && collaboratorSubmissionIsValid('bug'));
-      allow update: if isAdmin() || (isCollaborator() && collaboratorLeavesDependenciesUnchanged()
-        && (collaboratorPriorityUpdateIsValid() || collaboratorMessageIsValid()));
+      allow create: if workKindIsConfigured(request.resource.data.get('kind', null))
+        && (isAdmin() || (isCollaborator() && collaboratorSubmissionIsValid()));
+      allow update: if request.resource.data.get('kind', null) == resource.data.get('kind', null)
+        && (isAdmin() || (isCollaborator() && collaboratorLeavesDependenciesUnchanged()
+          && (collaboratorPriorityUpdateIsValid() || collaboratorMessageIsValid())));
       allow delete: if isAdmin();
     }
 
@@ -232,11 +249,13 @@ service cloud.firestore {
       allow delete: if isAdmin() && email != request.auth.token.email;
     }
 
-    // All other operational data remains administrator-only.
+    // All other operational data remains administrator-only. Work items are
+    // excluded so their kind constraint above cannot be bypassed here.
     match /{collection}/{document=**} {
       allow read, write: if isAdmin()
         && collection != 'pushDeviceTokens'
-        && collection != 'adminUsers';
+        && collection != 'adminUsers'
+        && collection != 'workItems';
     }
   }
 }

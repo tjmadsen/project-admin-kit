@@ -21,6 +21,8 @@ test('configure applies a new project identity across deployable surfaces', (t) 
     'functions/project-config.json', 'native-ios/ProjectAdminConfig.json',
     'scripts/configure.js', 'scripts/project-env.js', 'scripts/lib/project-config.js',
     'scripts/lib/agent-roster.js', 'scripts/lib/agent-defaults.json',
+    'scripts/lib/work-kinds.js', 'scripts/lib/work-kinds.defaults.json',
+    'firestore.rules', 'storage.rules',
     'scripts/agent-loops/machine-roster.json',
   ]) {
     const source = path.join(sourceRoot, relative);
@@ -57,9 +59,11 @@ test('configure applies a new project identity across deployable surfaces', (t) 
   const firebase = readJson(path.join(root, 'firebase.json'));
   assert.equal(firebase.hosting.rewrites[0].source, '/control');
   assert.equal(readJson(path.join(root, '.firebaserc')).projects.default, 'rocket-notes-prod');
-  assert.deepEqual(readJson(path.join(root, 'functions/project-config.json')), {
-    projectName: 'Rocket Notes', ownerEmail: 'owner@example.com', adminBaseUrl: 'https://rocket.example/control',
+  const functionsConfig = readJson(path.join(root, 'functions/project-config.json'));
+  assert.deepEqual({ ...functionsConfig, workKinds: undefined }, {
+    projectName: 'Rocket Notes', ownerEmail: 'owner@example.com', adminBaseUrl: 'https://rocket.example/control', workKinds: undefined,
   });
+  assert.deepEqual(Object.keys(functionsConfig.workKinds), Object.keys(config.workKinds));
   assert.equal(readJson(path.join(root, 'scripts/agent-loops/machine-roster.json')).machines[0].repoRoot, fs.realpathSync(root));
   assert.deepEqual(config.agents, readJson(path.join(sourceRoot, 'project-admin.config.json')).agents, 'configure preserves the agent roster');
   assert.deepEqual(readJson(path.join(root, 'scripts/agent-loops/machine-roster.json')).machines[0].agents, config.agents.map((agent) => agent.token));

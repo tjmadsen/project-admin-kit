@@ -22,7 +22,9 @@ function check(machine, queue, agent) {
 
 test('the roster entitles every shipped agent on the configured build and deploy queues', () => {
   assert.deepEqual(agentsForMachine(roster, 'local-mac').sort(), Object.keys(AGENTS).sort());
-  assert.equal(entitlements(roster, 'local-mac').length, Object.keys(AGENTS).length * 3);
+  const queues = roster.machines[0].queues;
+  assert.equal(entitlements(roster, 'local-mac').length, Object.keys(AGENTS).length * queues.length);
+  assert.equal(isEntitled(roster, 'local-mac', 'task', 'opus'), true);
   assert.equal(isEntitled(roster, 'local-mac', 'feature', 'opus'), true);
   assert.equal(isEntitled(roster, 'local-mac', 'deploy', 'grok'), true);
 });
@@ -50,13 +52,15 @@ test('the CLI answers through exit codes and enumerates jobs for provisioning', 
   const listed = execFileSync(process.execPath, [rosterPath, '--list', 'local-mac'], { encoding: 'utf8' })
     .trim()
     .split('\n');
-  assert.equal(listed.length, Object.keys(AGENTS).length * 3);
+  const buildQueues = roster.machines[0].queues.filter((queue) => queue !== 'deploy');
+  assert.equal(listed.length, Object.keys(AGENTS).length * (buildQueues.length + 1));
   assert.ok(listed.includes('deploy grok'));
   const jobs = new Set(listed.map((line) => {
     const [queue, agent] = line.split(' ');
     return queue === 'deploy' ? 'com.projectadmin.loop.configured-deploy' : `com.projectadmin.loop.${agent}-${queue}`;
   }));
-  assert.equal(jobs.size, 15);
+  // One job per agent x build queue, plus the single configured deploy loop.
+  assert.equal(jobs.size, Object.keys(AGENTS).length * buildQueues.length + 1);
 
   const agents = execFileSync(process.execPath, [rosterPath, '--agents', 'local-mac'], { encoding: 'utf8' }).trim();
   assert.equal(agents, Object.keys(AGENTS).join(','));

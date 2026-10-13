@@ -32,6 +32,8 @@ describe('Layout role navigation', () => {
     render(<MemoryRouter><Layout user={user} role="collaborator"><p>Content</p></Layout></MemoryRouter>)
     expect(screen.getByRole('link', { name: 'Feature Requests' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Bugs' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Tasks' })).toHaveAttribute('href', '/tasks')
+    expect(screen.getByText('Features · Bugs · Tasks · Loops · Activity')).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Dashboard' })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Agent Loops' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Activity' })).toBeInTheDocument()

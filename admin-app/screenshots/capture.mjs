@@ -35,6 +35,7 @@ const SCENES = [
   { name: 'dashboard', route: '/', query: {} },
   { name: 'features-list', route: '/features', query: {} },
   { name: 'features-detail', route: '/features', query: { item: 'FR-25' } },
+  { name: 'tasks-list', route: '/tasks', query: {} },
   { name: 'loops', route: '/loops', query: {} },
   {
     name: 'nav-drawer', route: '/features', query: {}, viewports: ['mobile'],

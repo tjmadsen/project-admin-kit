@@ -32,24 +32,23 @@ recorded grant or use the backlog CLI's `ask` command to hand the item back.
 Never re-ask for an already approved named action. Ending a turn with a question
 in prose and no CLI lifecycle mutation is a hard failure.
 
-All backlog state changes go through `scripts/feature-agent.js` or
-`scripts/bug-agent.js`. Every command uses `--as <agent>`. Refer to an item as
-FR-N or BUG-N in notes, never by its Firestore id. Use the id only as a CLI
-argument.
+All backlog state changes go through `scripts/work-agent.js`. Every command
+uses `--as <agent>`. Refer to an item by its reference (the claimed JSON's
+`ref`, e.g. FR-N or BUG-N) in notes, never by its Firestore id. Use the id only
+as a CLI argument; item commands read the kind from the document.
 
-## 1. Sync and drain both queues
+## 1. Sync and drain the deploy queue
 
 From the checkout in which the loop was launched:
 
 ```bash
 gtimeout 2m git fetch origin "$DEFAULT_BRANCH"
 gtimeout 2m git status --short --branch
-gtimeout 2m node scripts/feature-agent.js deploy-next --as <agent>
-gtimeout 2m node scripts/bug-agent.js deploy-next --as <agent>
+gtimeout 2m node scripts/work-agent.js deploy-next --as <agent>
 ```
 
-Claim from the feature queue first; query the bug queue only when the feature
-command returns `{"none":true}`. When both are empty, stop. After each item has
+The deploy queue spans every configured kind with `deploys: true` (kinds such
+as tasks never reach it). When it returns `{"none":true}`, stop. After each item has
 shipped, resolved, or been handed back with `ask` or a mechanical-conflict
 `set`, fetch again and repeat. Keep
 a set of ids seen during the run. If the same id is returned twice, hand it back
@@ -61,7 +60,7 @@ row per approved target:
 
 | Target | Exact command | Live proof | Acceptance behavior |
 |---|---|---|---|
-| `<approved target>` | `<command below, with item values filled in>` | `<revision, build, URL, or content hash>` | `<observable FR/BUG outcome>` |
+| `<approved target>` | `<command below, with item values filled in>` | `<revision, build, URL, or content hash>` | `<observable item outcome>` |
 
 Inspect the PR file list and diff. If they require a target absent from the
 approved set, if `mixed` hides the surfaces, or if any value in the matrix is
@@ -81,9 +80,9 @@ before running anything:
 
 ```bash
 AGENT='<agent>'
-ITEM_CLI='scripts/feature-agent.js' # or scripts/bug-agent.js
+ITEM_CLI='scripts/work-agent.js'
 ITEM_ID='<Firestore id from the claimed JSON>'
-ITEM_REF='FR-N'                     # or BUG-N
+ITEM_REF='<ref from the claimed JSON, e.g. FR-N or BUG-N>'
 PR_NUMBER='<recorded PR number>'
 
 PR_JSON="$(gtimeout 2m gh pr view "$PR_NUMBER" --json state,mergeable,mergeStateStatus,headRefName,headRefOid,files,statusCheckRollup)"
@@ -152,7 +151,7 @@ For every completed non-TestFlight target, record proof immediately:
 gtimeout 2m node "$ITEM_CLI" deploy-check "$ITEM_ID" --as "$AGENT" \
   --target '<target>' \
   --proof '<deployed revision/build plus the concrete live check>' \
-  --acceptance '<how the observed behavior satisfies the FR/BUG>'
+  --acceptance '<how the observed behavior satisfies the item>'
 ```
 
 ## Target: `firebase_hosting`
@@ -349,7 +348,7 @@ worktree at merged `origin/$DEFAULT_BRANCH`. The product client uses
 bundle ID and say which app is intended.
 
 ```bash
-PROJECT_ADMIN_COLLECTION='featureRequests' # or bugs
+PROJECT_ADMIN_COLLECTION='workItems'
 PROJECT_ADMIN_UPLOAD_SCRIPT='scripts/upload-testflight.sh'
 PROJECT_ADMIN_BUNDLE_ID='<approved product bundle id>'
 # For Project Admin instead use:
@@ -373,7 +372,7 @@ timestamp build number, uploads, requires the upload marker, polls App Store
 Connect to `VALID`, records TestFlight proof, removes the worktree, and returns
 the item to `acceptance_review`.
 
-**Proof:** Never call `ship` or `resolve` for a TestFlight item. `VALID` is delivery proof,
+**Proof:** Never call `complete` (or `ship`/`resolve`) for a TestFlight item. `VALID` is delivery proof,
 not the project owner's hands-on acceptance. Preserve the feature-specific acceptance request.
 Logs are under `~/Library/Logs/ProjectAdminAgentLoops/`. Known failures: a fresh
 worktree missing `ios/Flutter/ephemeral` because the two Flutter preparation
@@ -398,7 +397,7 @@ gtimeout 2m git show --stat --oneline "$MERGED_SHA"
 gtimeout 2m node "$ITEM_CLI" deploy-check "$ITEM_ID" --as "$AGENT" \
   --target none \
   --proof "Merged commit $MERGED_SHA is present on origin/$DEFAULT_BRANCH; no runtime surface is required." \
-  --acceptance '<the merged tests/files that satisfy the FR/BUG without deployment>'
+  --acceptance '<the merged tests/files that satisfy the item without deployment>'
 ```
 
 **Proof:** Record the merged commit, passing code-level verification, and why no
@@ -422,9 +421,7 @@ a new handback.
 After every approved non-TestFlight target has a `deploy-check`, close the item:
 
 ```bash
-gtimeout 2m node "$ITEM_CLI" ship "$ITEM_ID" --as "$AGENT" -m '<merge SHA, every target, proof, and end-to-end FR outcome>'
-# For bugs use:
-# gtimeout 2m node "$ITEM_CLI" resolve "$ITEM_ID" --as "$AGENT" -m '<merge SHA, every target, proof, and end-to-end BUG outcome>'
+gtimeout 2m node "$ITEM_CLI" complete "$ITEM_ID" --as "$AGENT" -m '<merge SHA, every target, proof, and end-to-end item outcome>'
 gtimeout 10m git worktree remove "$DEPLOY_WT"
 gtimeout 2m git fetch origin "$DEFAULT_BRANCH"
 ```

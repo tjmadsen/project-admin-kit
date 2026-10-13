@@ -155,9 +155,17 @@ ignored `.agent-logs/` directory.
 
 ## Backlog CLI
 
-All state changes go through the wrappers:
+All state changes go through `scripts/work-agent.js`, which serves every kind
+configured in `project-admin.config.json#workKinds` (`--kind <id>`, or
+`PROJECT_ADMIN_WORK_KIND`). `feature-agent.js` and `bug-agent.js` are shims
+scoped to those two kinds. Item commands (`show`, `reply`, `pr`, `deploy-check`,
+...) read the kind from the document, and `deploy-next` without `--kind` spans
+every kind with `deploys: true`. `node scripts/lib/work-kinds.js queues` prints
+the valid loop queue names.
 
 ```bash
+node scripts/work-agent.js --kind task next --as terra
+node scripts/work-agent.js deploy-next --as sonnet
 node scripts/feature-agent.js list --as terra
 node scripts/feature-agent.js next --as terra
 node scripts/feature-agent.js ask <id> --as terra -m "Question for the project owner"

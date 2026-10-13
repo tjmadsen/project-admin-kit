@@ -25,6 +25,8 @@ function loadProjectConfig() {
   } catch (error) {
     throw new Error(`${error.message} (${CONFIG_PATH})`);
   }
+  // Lazy require: work-kinds.js itself loads this module.
+  if (config.workKinds !== undefined) require('./work-kinds').resolveWorkKinds(config.workKinds);
   return config;
 }
 

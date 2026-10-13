@@ -81,6 +81,8 @@ describe('Agent Loops run details', () => {
   it('routes feature and bug references to their detail views', () => {
     expect(runItemPath({ activeItem: 'FR-29', activeCollection: 'featureRequests' })).toBe('/features?item=FR-29')
     expect(runItemPath({ activeItem: 'BUG-16' })).toBe('/bugs?item=BUG-16')
+    expect(runItemPath({ activeItem: 'TASK-4', activeCollection: 'workItems' })).toBe('/tasks?item=TASK-4')
+    expect(runItemPath({ activeItem: 'NOPE-4' })).toBeNull()
     expect(runItemPath({ activeItem: 'selecting work' })).toBeNull()
   })
 })

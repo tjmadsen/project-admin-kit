@@ -12,6 +12,7 @@ import WorkItems from '../src/pages/WorkItems'
 import AgentLoops from '../src/pages/AgentLoops'
 import Activity from '../src/pages/Activity'
 import Operations from '../src/pages/Operations'
+import { WORK_KINDS, workKindPath } from '../src/lib/work-kinds'
 import '../src/index.css'
 
 const params = new URLSearchParams(window.location.search)
@@ -42,8 +43,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Layout user={user} role={role}>
           <Routes>
             <Route path="/" element={role === 'admin' ? <Dashboard /> : <Navigate to="/features" replace />} />
-            <Route path="/features" element={<WorkItems kind="feature" canManage={role === 'admin'} actorEmail={user.email || ''} actorName={actorName} />} />
-            <Route path="/bugs" element={<WorkItems kind="bug" canManage={role === 'admin'} actorEmail={user.email || ''} actorName={actorName} />} />
+            {WORK_KINDS.map((kind) => <Route key={kind.id} path={workKindPath(kind)} element={<WorkItems key={kind.id} kind={kind.id} canManage={role === 'admin'} actorEmail={user.email || ''} actorName={actorName} />} />)}
             <Route path="/loops" element={<AgentLoops canManage={role === 'admin'} />} />
             <Route path="/activity" element={<Activity readOnly={role !== 'admin'} />} />
             <Route path="/operations" element={<Operations />} />

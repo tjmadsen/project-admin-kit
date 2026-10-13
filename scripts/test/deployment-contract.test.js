@@ -110,7 +110,7 @@ test('exposes close-no-deploy as a backlog command that never records deployment
   const source = fs.readFileSync(path.join(__dirname, '..', 'lib', 'backlog-agent.js'), 'utf8');
   assert.match(source, /case 'close-no-deploy': return closeWithoutDeployment\(id, flags\);/);
   const body = source.slice(source.indexOf('async function closeWithoutDeployment'), source.indexOf('async function setFields'));
-  assert.match(body, /assertClosableWithoutDeployment\(snapshot\.data\(\)\)/);
+  assert.match(body, /assertClosableWithoutDeployment\(data\)/);
   assert.match(body, /Closed without deployment: \$\{note\}/);
   assert.doesNotMatch(body, /deployedAt|deploymentVerifiedAt|deploymentAcceptedAt/);
 });

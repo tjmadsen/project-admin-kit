@@ -23,6 +23,8 @@ const ROSTER_FILES = [
   'scripts/lib/agent-roster.js',
   'scripts/lib/agent-defaults.json',
   'scripts/lib/project-config.js',
+  'scripts/lib/work-kinds.js',
+  'scripts/lib/work-kinds.defaults.json',
 ];
 
 function copyRosterFiles(root) {
@@ -65,7 +67,7 @@ function makeSandbox() {
 if [[ "\${1:-}" == "-e" ]]; then exec ${REAL_NODE} "$@"; fi
 name="$(basename "\${1:-}")"
 case "$name" in
-  classify-run-result.js|agents.js) exec ${REAL_NODE} "$@" ;;
+  classify-run-result.js|agents.js|work-kinds.js) exec ${REAL_NODE} "$@" ;;
   log-run.js)
     echo "LOG_RUN_ARGV: $*" >> ${record}
     case "\${2:-}" in
@@ -74,7 +76,7 @@ case "$name" in
       configured-agent) echo sonnet ;;
       *) : ;;
     esac ;;
-  feature-agent.js|bug-agent.js) echo '{"count":1,"topThinkingEffort":"medium"}' ;;
+  feature-agent.js|bug-agent.js|work-agent.js) echo '{"count":1,"topThinkingEffort":"medium"}' ;;
   *) : ;;
 esac
 `, 0o755);

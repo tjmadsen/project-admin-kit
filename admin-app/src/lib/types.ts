@@ -1,4 +1,5 @@
-export type WorkKind = 'feature' | 'bug'
+// A configured work kind id (feature, bug, task, ...); see lib/work-kinds.ts.
+export type WorkKind = string
 export type Priority = 'critical' | 'high' | 'medium' | 'low'
 export type WaitingOn = 'agent' | 'human' | 'deployer' | 'hold' | 'done'
 export type ReviewGate = 'triage' | 'question' | 'plan_review' | 'pr_review' | 'deploy_approval' | 'acceptance_review'
@@ -67,7 +68,8 @@ export interface AgentLoopRun {
   status: string
   activeItem?: string
   activeItemId?: string
-  activeCollection?: 'featureRequests' | 'bugs'
+  // workItems, or featureRequests/bugs on runs recorded before the migration.
+  activeCollection?: string
   thinkingEffort?: string
   startedAt: unknown
   heartbeatAt: unknown

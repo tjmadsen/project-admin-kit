@@ -110,7 +110,7 @@ test('confirmation handoff exposes completed work, remaining work, and A/B choic
 });
 
 test('confirmation handoff transaction moves only the exact active deploy claim to question review', async () => {
-  const run = { agent: 'sol', queue: 'deploy', activeItem: 'BUG-3', activeItemId: 'bug-3', activeCollection: 'bugs' };
+  const run = { agent: 'sol', queue: 'deploy', activeItem: 'BUG-3', activeItemId: 'bug-3', activeCollection: 'workItems' };
   const item = { number: 3, claimedBy: 'sol', claimRunId: 'run-1', waitingOn: 'deployer' };
   const database = withRunSnapshot(fakeDatabase(run, item));
   const result = await handoffConfirmationRequest(
@@ -153,8 +153,10 @@ test('confirmation handoff transaction refuses a newer claim', async () => {
 
 test('releases only the claim belonging to the interrupted run', () => {
   const run = { agent: 'fable', queue: 'feature', activeItem: 'FR-7' };
-  assert.equal(collectionForRun(run), 'featureRequests');
-  assert.equal(collectionForRun({ agent: 'terra', queue: 'deploy', activeItem: 'BUG-2' }), 'bugs');
+  assert.equal(collectionForRun(run), 'workItems');
+  assert.equal(collectionForRun({ agent: 'terra', queue: 'deploy', activeItem: 'BUG-2' }), 'workItems');
+  assert.equal(collectionForRun({ agent: 'terra', queue: 'deploy', activeItemId: 'x', activeCollection: 'bugs' }), 'workItems');
+  assert.equal(collectionForRun({ agent: 'terra', queue: 'task' }), null);
   assert.equal(claimBelongsToRun({ claimedBy: 'fable', claimRunId: 'run-1' }, run, 'run-1'), true);
   assert.equal(claimBelongsToRun({ claimedBy: 'fable', claimRunId: 'newer-run' }, run, 'run-1'), false);
   assert.equal(claimBelongsToRun({ claimedBy: 'sol', claimRunId: 'run-1' }, run, 'run-1'), false);
@@ -175,7 +177,7 @@ test('Claude has no hidden wait cap while the runner keeps a bounded outer timeo
   assert.match(runner, /log-run\.js" release-claim/);
   assert.match(runner, /confirmation-handoff/);
   assert.match(runner, /confirmation-handoff[^\n]+--output "\$summary"/);
-  assert.match(backlog, /claimRunId: process\.env\.PROJECT_ADMIN_AGENT_RUN_ID/);
+  assert.match(backlog, /claimRunId: env\.PROJECT_ADMIN_AGENT_RUN_ID/);
   assert.match(runLog, /claimBelongsToRun/);
 });
 

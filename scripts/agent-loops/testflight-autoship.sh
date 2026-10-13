@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Detached TestFlight upload that returns an item for hands-on acceptance.
-# Usage: testflight-autoship.sh <featureRequests|bugs> <docId> <agent> <worktree> [label] [upload-script] [bundle-id]
+# Usage: testflight-autoship.sh <workItems> <docId> <agent> <worktree> [label] [upload-script] [bundle-id]
 set -uo pipefail
 
-[[ "$#" -ge 4 ]] || { echo "Usage: $0 <featureRequests|bugs> <docId> <agent> <worktree> [label] [upload-script] [bundle-id]" >&2; exit 2; }
+[[ "$#" -ge 4 ]] || { echo "Usage: $0 <workItems> <docId> <agent> <worktree> [label] [upload-script] [bundle-id]" >&2; exit 2; }
 COLLECTION="$1"; DOC_ID="$2"; AGENT_TOKEN="$3"; BUILD_WORKTREE="$4"; LABEL="${5:-$DOC_ID}"
 UPLOAD_SCRIPT="${6:-scripts/upload-testflight.sh}"
 BUNDLE_ID="${7:-${PROJECT_ADMIN_IOS_BUNDLE_ID:-}}"
@@ -18,9 +18,11 @@ LOG_FILE="$LOG_DIR/testflight-${DOC_ID}-${BUILD_NUMBER}.log"
 LOCK_DIR="${PROJECT_ADMIN_TESTFLIGHT_LOCK_DIR:-$HOME/$STATE_DIRECTORY/testflight-lock}"
 mkdir -p "$(dirname "$LOCK_DIR")"
 
+# Every kind lives in workItems; the legacy collection names are accepted so a
+# launch recorded before the migration still resolves. The CLI reads the kind
+# from the document itself.
 case "$COLLECTION" in
-  featureRequests) CLI="$REPO_ROOT/scripts/feature-agent.js" ;;
-  bugs) CLI="$REPO_ROOT/scripts/bug-agent.js" ;;
+  workItems|featureRequests|bugs) CLI="$REPO_ROOT/scripts/work-agent.js" ;;
   *) echo "Invalid collection $COLLECTION" >&2; exit 2 ;;
 esac
 

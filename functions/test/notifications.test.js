@@ -19,8 +19,8 @@ const base = {
   messages: [],
 };
 
-function notification(before, after, collectionId = 'featureRequests') {
-  return buildNotification({ before, after, collectionId, adminEmail, adminBaseUrl });
+function notification(before, after, kind = 'feature', workKinds) {
+  return buildNotification({ before, after, kind, workKinds, adminEmail, adminBaseUrl });
 }
 
 describe('lifecycle notification matrix', () => {
@@ -94,8 +94,26 @@ describe('lifecycle notification matrix', () => {
   it('builds an exact admin deep link for features and bugs', () => {
     const feature = notification(base, { ...base, status: 'in_review', waitingOn: 'human', blockedReason: 'pr_review', prUrl: 'https://github.com/owner/repository/pull/9' });
     assert.equal(feature.primaryUrl, 'https://example.com/admin/features?item=FR-9&gate=pr_review');
-    const bug = notification({ ...base, number: 12 }, { ...base, number: 12, status: 'plan_review', waitingOn: 'human', blockedReason: 'plan_review' }, 'bugs');
+    const bug = notification({ ...base, number: 12 }, { ...base, number: 12, status: 'plan_review', waitingOn: 'human', blockedReason: 'plan_review' }, 'bug');
     assert.equal(bug.primaryUrl, 'https://example.com/admin/bugs?item=BUG-12&gate=plan_review');
+  });
+
+  it('uses configured kind labels, prefixes, and routes', () => {
+    const workKinds = { ...require('../project-config.json').workKinds, chore: { label: 'Chore', prefix: 'CH', route: 'chores' } };
+    const chore = notification(base, { ...base, kind: 'chore', status: 'in_review', waitingOn: 'human', blockedReason: 'pr_review' }, 'chore', workKinds);
+    assert.equal(chore.reference, 'CH-9');
+    assert.equal(chore.kind, 'chore');
+    assert.equal(chore.kindLabel, 'Chore');
+    assert.equal(chore.primaryUrl, 'https://example.com/admin/chores?item=CH-9&gate=pr_review');
+    assert.match(renderEmail(chore).text, /^Project · Chore\n/);
+    const bug = notification(base, { ...base, status: 'closed', waitingOn: 'done' }, 'bug', workKinds);
+    assert.match(bug.subject, /BUG-9 completed — closed/);
+  });
+
+  it('stays silent for documents copied by the workItems migration', () => {
+    const migrated = { ...base, status: 'shipped', waitingOn: 'done', migratedFrom: 'featureRequests' };
+    assert.equal(notification(null, migrated), null);
+    assert.equal(notification(null, { ...base, status: 'backlog', waitingOn: 'human', blockedReason: 'triage', migratedFrom: 'featureRequests' }), null);
   });
 
   it('derives a stable delivery id from the Firestore event', () => {
