@@ -66,12 +66,38 @@ the first heartbeat and subsequent run history.
 Add each scheduled kind to that host's `queues` in the machine roster; the valid
 queue names are printed by `node scripts/lib/work-kinds.js queues`.
 
+## 7. Choose deploy targets
+
+`deployments.targets` in `project-admin.config.json` lists the release surfaces
+the console offers and the deploy loop may execute; each one points at a
+runbook (see [ARCHITECTURE.md](ARCHITECTURE.md#deploy-targets)). The sample
+enables Firebase Hosting, Functions, and rules/indexes and lists the other
+built-ins with `"enabled": false`. To add a surface the kit does not ship, write
+a runbook modeled on [`deploy-targets/examples/fly.md`](deploy-targets/examples/fly.md),
+add `"<id>": { "label": "...", "runbook": "..." }`, and run
+`node scripts/lib/deploy-targets.js check`.
+
 TestFlight is disabled in the sample configuration. To enable it, provide all
 `PROJECT_ADMIN_ASC_*`, Apple team, and bundle-id environment variables; generate
-the optional SwiftUI project with XcodeGen; and validate `--check` before adding
+the optional SwiftUI project with XcodeGen; validate `--check`; then set
+`"testflight": {}` (it keeps `requiresHumanAcceptance: true`) before adding
 TestFlight to any approved target set.
 
 ## Upgrading
+
+### From boolean `deployments` flags to `deployments.targets`
+
+The earlier `"deployments": { "firebaseHosting": true, ... }` map still loads
+and keeps every built-in target available, as before. To make the flags real,
+print the equivalent `targets` map and paste it over the old block:
+
+```bash
+node scripts/lib/deploy-targets.js migrate
+```
+
+Each `false` becomes `"enabled": false`, which hides that target from the
+console picker and rejects it in new `deploy-pending --targets`; items that
+already recorded it keep resolving.
 
 ### From separate `featureRequests`/`bugs` collections to `workItems`
 

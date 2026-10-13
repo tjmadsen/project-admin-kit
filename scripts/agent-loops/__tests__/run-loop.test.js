@@ -25,6 +25,8 @@ const ROSTER_FILES = [
   'scripts/lib/project-config.js',
   'scripts/lib/work-kinds.js',
   'scripts/lib/work-kinds.defaults.json',
+  'scripts/lib/deploy-targets.js',
+  'scripts/lib/deploy-targets.defaults.json',
 ];
 
 function copyRosterFiles(root) {

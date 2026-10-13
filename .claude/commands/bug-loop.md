@@ -107,12 +107,14 @@ verified by the project owner outside the deploy loop), use
 closes the bug with the note in the thread and no deployment timestamps, and
 refuses while any release scope is planned, approved, queued, or in flight.
 
-Allowed targets are `testflight`, `firebase_hosting`, `firebase_functions`,
-`firebase_rules_indexes`, `vercel`, `flutter_web`, `cloud_run`, and `none`.
+Allowed targets are the enabled ids printed by
+`node scripts/lib/deploy-targets.js ids` (from `deployments.targets`; `none` is
+always available), and each one's runbook says what its notes must cover.
 Select every required surface from the PR and root cause; never use `mixed`.
 Notes must itemize scope, exact command order, target-specific live proof, and
-the behavior demonstrating the bug is fixed. TestFlight always returns to the project owner
-for hands-on acceptance before resolution.
+the behavior demonstrating the bug is fixed. TestFlight (and any target with
+`requiresHumanAcceptance`) always returns to the project owner for hands-on
+acceptance before resolution.
 Identify the release by PR number, recorded branch, approved targets/surfaces,
 and expected behavior. Never make the grant conditional on the PR head equaling
 a fixed SHA or on `headRefOid` equality; SHAs belong only in audit/comparison

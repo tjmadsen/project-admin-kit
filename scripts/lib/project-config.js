@@ -27,6 +27,12 @@ function loadProjectConfig() {
   }
   // Lazy require: work-kinds.js itself loads this module.
   if (config.workKinds !== undefined) require('./work-kinds').resolveWorkKinds(config.workKinds);
+  // Deploy targets (new `targets` map or the legacy boolean map).
+  try {
+    require('./deploy-targets').resolveDeployTargets(config.deployments);
+  } catch (error) {
+    throw new Error(`${error.message} (${CONFIG_PATH})`);
+  }
   return config;
 }
 

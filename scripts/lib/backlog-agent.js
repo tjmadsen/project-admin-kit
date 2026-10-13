@@ -5,11 +5,13 @@ const os = require('node:os');
 const { resolveAgent } = require('./agents');
 const {
   assertClosableWithoutDeployment,
+  deployTargetLabel,
   deploymentTargetsFor,
   legacyDeploymentType,
   missingDeploymentEvidence,
   normalizeDeploymentTargets,
   resetDeploymentForPrChange,
+  targetsRequiringHumanAcceptance,
   validateDeploymentNotes,
 } = require('./deployment-contract');
 const {
@@ -368,7 +370,8 @@ function createBacklogAgent({
     if (!data.deploymentApprovedAt) throw new Error(`Cannot complete an item before ${OWNER_NAME} approves its deployment scope`);
     const targets = deploymentTargetsFor(data, true);
     if (targets.length === 0) throw new Error('Cannot complete an item with an ambiguous or empty approved deployment scope');
-    if (targets.includes('testflight')) throw new Error(`TestFlight items require ${OWNER_NAME} hands-on acceptance and cannot be closed by the deploy loop`);
+    const humanAccepted = targetsRequiringHumanAcceptance(targets);
+    if (humanAccepted.length > 0) throw new Error(`${humanAccepted.map(deployTargetLabel).join(' + ')} items require ${OWNER_NAME} hands-on acceptance and cannot be closed by the deploy loop`);
     const missing = missingDeploymentEvidence(data, targets);
     if (missing.length > 0) throw new Error(`Cannot complete deployment; missing target-specific proof and acceptance verification for: ${missing.join(', ')}`);
     return mutate(id, flags, {

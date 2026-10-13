@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { DEPLOY_TARGETS } = require('../lib/deployment-contract');
+const { loadDeployTargets, resolveDeployTargets } = require('../lib/deploy-targets');
 const { loadWorkKinds } = require('../lib/work-kinds');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -18,23 +18,36 @@ function read(relativePath) {
   return fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
 }
 
-test('canonical deploy runbook documents every deployment-contract target', () => {
-  const runbook = read('.claude/commands/deploy-loop.md');
-  for (const target of DEPLOY_TARGETS) {
-    const heading = `## Target: \`${target}\``;
-    assert.match(
-      runbook,
-      new RegExp('^## Target: `' + target + '`$', 'm'),
-      `missing canonical deploy heading for ${target}`
-    );
-    const start = runbook.indexOf(heading);
-    const next = runbook.indexOf('\n## Target:', start + heading.length);
-    const section = runbook.slice(start, next === -1 ? undefined : next);
-    assert.match(section, /Preconditions:/i, `${target} must name its preconditions`);
-    assert.match(section, /```bash[\s\S]*?gtimeout/, `${target} must provide a time-bounded command block`);
-    assert.match(section, /proof/i, `${target} must define live proof`);
-    assert.match(section, /Known failure/i, `${target} must list known failures`);
+// A deploy-target runbook names its preconditions, a time-bounded command
+// block, the live proof to capture, and its known failures.
+function assertTargetRunbook(relativePath, target) {
+  const runbook = read(relativePath);
+  assert.match(runbook, new RegExp('^# Target: `' + target + '`$', 'm'), `${relativePath} must open with its target heading`);
+  assert.match(runbook, /Preconditions:/i, `${target} must name its preconditions`);
+  assert.match(runbook, /```bash[\s\S]*?gtimeout/, `${target} must provide a time-bounded command block`);
+  assert.match(runbook, /proof/i, `${target} must define live proof`);
+  assert.match(runbook, /Known failure/i, `${target} must list known failures`);
+}
+
+test('every configured and built-in deploy target has a complete runbook', () => {
+  const targets = [...loadDeployTargets(), ...resolveDeployTargets(undefined)];
+  for (const target of targets) {
+    assert.ok(fs.existsSync(path.join(repoRoot, target.runbook)), `${target.id} runbook ${target.runbook} must exist`);
+    assertTargetRunbook(target.runbook, target.id);
   }
+  // Example targets ship as documentation and must stay just as complete.
+  const examples = path.join(repoRoot, 'docs/deploy-targets/examples');
+  for (const file of fs.readdirSync(examples).filter((name) => name.endsWith('.md'))) {
+    assertTargetRunbook(`docs/deploy-targets/examples/${file}`, path.basename(file, '.md'));
+  }
+});
+
+test('the deploy runbook is generic and reads each approved target\'s runbook from config', () => {
+  const runbook = read('.claude/commands/deploy-loop.md');
+  assert.doesNotMatch(runbook, /^## Target:/m, 'per-target procedures live in their runbook files');
+  assert.match(runbook, /node scripts\/lib\/deploy-targets\.js show/);
+  assert.match(runbook, /deployments\.targets/);
+  assert.match(runbook, /requiresHumanAcceptance/);
 });
 
 test('agent-loop prompts delegate to their canonical command files', () => {
@@ -117,7 +130,7 @@ test('release handoffs use durable PR scope and preserve approval for mechanical
   assert.match(deploy, /git rev-list --no-merges[\s\S]{0,120}--not "?origin\/\$DEFAULT_BRANCH"?/);
   assert.match(deploy, /git show --cc --stat/);
   assert.match(deploy, /head SHA is audit evidence, not immutable release scope/i);
-  assert.match(deploy, /item-specific focused tests from\s+the merged deploy worktree/i);
+  assert.match(read('docs/deploy-targets/none.md'), /item-specific focused tests from\s+the merged deploy worktree/i);
 });
 
 test('AGENTS.md carries the runnable test matrix and CLAUDE.md defers to it', () => {

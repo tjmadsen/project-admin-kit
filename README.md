@@ -27,7 +27,8 @@ repository so isolated agent worktrees and PR release proofs remain coherent.
   runner adapters out of the box, plus a generic `command` runner for any other
   CLI (`agents` in `project-admin.config.json`).
 - Human-gated Firebase Hosting, Functions, rules/indexes, Vercel, Flutter web,
-  Cloud Run, and TestFlight runbooks.
+  Cloud Run, and TestFlight runbooks; deploy targets are configuration
+  (`deployments.targets`), so a new surface is a config entry plus a runbook.
 - Optional lifecycle email/push Functions and SwiftUI iOS admin shell.
 - CI, screenshot harness, configuration/bootstrap tooling, and a placeholder
   marketing page.

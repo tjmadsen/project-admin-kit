@@ -681,6 +681,14 @@ describe('WorkItems collaborator access', () => {
     expect(screen.queryByRole('option', { name: 'Mixed release' })).not.toBeInTheDocument()
   })
 
+  it('offers the configured deploy targets: enabled ones plus any the item already names', async () => {
+    state.data = [{ ...item, deploymentType: 'firebase_hosting', deploymentTargets: ['firebase_hosting'] }]
+    render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+    const picker = await screen.findByRole('group', { name: 'Deployment targets' })
+    // The sample config disables TestFlight, Vercel, Flutter web, and Cloud Run.
+    expect(within(picker).getAllByRole('checkbox').map((box) => box.getAttribute('aria-label'))).toEqual(['Firebase Hosting', 'Firebase Functions', 'Rules & indexes', 'No deploy'])
+  })
+
   it('shows a deployment action instead of sending an approved release back to the build agent', async () => {
     state.data = [{ ...item, assignedTo: 'sol-agent', status: 'ready_for_deploy', blockedReason: 'deploy_approval', prNumber: 42, prUrl: 'https://github.com/example/repo/pull/42', branchName: 'sol/fr-42', deploymentNotes: validDeploymentNotes }]
     render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
@@ -972,7 +980,7 @@ describe('deployment handoff contract', () => {
 
     expect(deliveryCard).toHaveAttribute('open')
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start', behavior: 'smooth' }))
-    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'TestFlight' })).toHaveFocus())
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Firebase Hosting' })).toHaveFocus())
     expect(firestore.updateDoc).not.toHaveBeenCalled()
   })
 

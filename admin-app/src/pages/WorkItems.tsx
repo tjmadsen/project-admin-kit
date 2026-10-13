@@ -12,7 +12,7 @@ import { useCollection } from '../hooks/useCollection'
 import { useLoopRuns } from '../hooks/useLoopData'
 import { AGENT_MODELS, DEFAULT_WORK_AGENT, agentByOwner, agentByToken } from '../lib/agents'
 import { attachmentFilesFromDataTransfer, mergeAttachmentFiles, uploadWorkAttachments, type UploadedAttachments } from '../lib/attachments'
-import { DEPLOYMENT_TARGETS, deploymentTargetsFor, legacyDeploymentType, normalizeDeploymentTargets } from '../lib/deployment'
+import { deploymentTargetsFor, legacyDeploymentType, normalizeDeploymentTargets, pickerDeploymentTargets } from '../lib/deployment'
 import { db } from '../lib/firebase'
 import { deploymentLabel, formatRelative, gateLabel, itemRef, matchesItemReference, ownerLabel, toDate, waitingLabel } from '../lib/format'
 import { readPreference, writePreference } from '../lib/preferences'
@@ -902,7 +902,7 @@ function DeploymentTargetPicker({ value, disabled, onChange }: { value: string[]
   }
   return <fieldset className="deployment-target-picker wide-field" aria-label="Deployment targets" disabled={disabled}>
     <legend>Deployment targets <small>Choose every release surface</small></legend>
-    <div>{DEPLOYMENT_TARGETS.map((target) => <label key={target}><input type="checkbox" aria-label={deploymentLabel(target)} checked={selected.includes(target)} onChange={(event) => toggle(target, event.target.checked)} /><span>{deploymentLabel(target)}</span></label>)}</div>
+    <div>{pickerDeploymentTargets(selected).map(({ id, label }) => <label key={id}><input type="checkbox" aria-label={label} checked={selected.includes(id)} onChange={(event) => toggle(id, event.target.checked)} /><span>{label}</span></label>)}</div>
   </fieldset>
 }
 

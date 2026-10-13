@@ -122,8 +122,9 @@ node scripts/feature-agent.js deploy-pending <id> --as <agent> \
   -m "ready for deployment approval"
 ```
 
-Allowed targets are `testflight`, `firebase_hosting`, `firebase_functions`,
-`firebase_rules_indexes`, `vercel`, `flutter_web`, `cloud_run`, and `none`.
+Allowed targets are the enabled ids printed by
+`node scripts/lib/deploy-targets.js ids` (from `deployments.targets`; `none` is
+always available), and each one's runbook says what its notes must cover.
 Select every required surface explicitly; never use `mixed`. The notes must give
 exact commands/order, target-specific live proof, and observable acceptance.
 Identify the release by PR number, recorded branch, approved targets/surfaces,

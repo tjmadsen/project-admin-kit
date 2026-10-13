@@ -1,0 +1,42 @@
+{
+  "testflight": {
+    "label": "TestFlight",
+    "runbook": "docs/deploy-targets/testflight.md",
+    "requiresHumanAcceptance": true,
+    "legacyKey": "testflight"
+  },
+  "firebase_hosting": {
+    "label": "Firebase Hosting",
+    "runbook": "docs/deploy-targets/firebase_hosting.md",
+    "legacyKey": "firebaseHosting"
+  },
+  "firebase_functions": {
+    "label": "Firebase Functions",
+    "runbook": "docs/deploy-targets/firebase_functions.md",
+    "legacyKey": "firebaseFunctions"
+  },
+  "firebase_rules_indexes": {
+    "label": "Rules & indexes",
+    "runbook": "docs/deploy-targets/firebase_rules_indexes.md",
+    "legacyKey": "firebaseRulesIndexes"
+  },
+  "vercel": {
+    "label": "Vercel",
+    "runbook": "docs/deploy-targets/vercel.md",
+    "legacyKey": "vercel"
+  },
+  "flutter_web": {
+    "label": "Flutter web",
+    "runbook": "docs/deploy-targets/flutter_web.md",
+    "legacyKey": "flutterWeb"
+  },
+  "cloud_run": {
+    "label": "Cloud Run",
+    "runbook": "docs/deploy-targets/cloud_run.md",
+    "legacyKey": "cloudRun"
+  },
+  "none": {
+    "label": "No deploy",
+    "runbook": "docs/deploy-targets/none.md"
+  }
+}
