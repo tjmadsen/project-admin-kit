@@ -4,6 +4,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { ROOT, CONFIG_PATH, resolveBackend, validateProjectConfig } = require('./lib/project-config');
+const { resolveLayout } = require('./lib/layout');
 const { normalizeRoster } = require('./lib/agent-roster');
 const { loadWorkKinds, queueNames, syncDerivedFiles } = require('./lib/work-kinds');
 
@@ -16,6 +17,7 @@ const FLAG_PATHS = {
   repo: ['repository', 'slug'], branch: ['repository', 'defaultBranch'], ownerName: ['admin', 'ownerName'], ownerEmail: ['admin', 'ownerEmail'],
   machineId: ['automation', 'defaultMachineId'], machineLabel: ['automation', 'defaultMachineLabel'],
   workAgent: ['automation', 'defaultWorkAgent'], deployAgent: ['automation', 'defaultDeployAgent'],
+  productRoot: ['layout', 'productRoot'],
 };
 
 function parseArgs(argv) {
@@ -82,6 +84,7 @@ function main() {
     console.log('npm run configure -- --name "App Name" --slug app-name [--backend firestore|local|github] --firebase-project id --api-key key --messaging-sender-id id --app-id id --production-url https://app.example --owner-email owner@example.com --owner-name "Owner" --repo owner/repo');
     console.log('  --backend local  [--local-path ~/.project-admin/app/store.json]   no Firebase keys needed');
     console.log('  --backend github [--github-repo owner/repo] [--label-prefix pa:]   no Firebase keys needed');
+    console.log('  --product-root ..|/path/to/product   the kit is embedded in, or separate from, the product repository (docs/LAYOUTS.md)');
     return;
   }
   // Validated after the flags apply, so --backend can drop Firebase requirements.
@@ -125,10 +128,14 @@ function main() {
     projectName: config.project.name,
     adminURL: `${config.project.productionUrl.replace(/\/$/, '')}${config.project.adminPath.replace(/\/$/, '')}/`,
   });
+  // repoRoot is the product checkout loops make worktrees in; kitRoot is named
+  // only when the kit is not that checkout (docs/LAYOUTS.md).
+  const layout = resolveLayout(config, { env: {} });
   writeJson(path.join(ROOT, 'scripts/agent-loops/machine-roster.json'), { machines: [{
     id: config.automation.defaultMachineId,
     label: config.automation.defaultMachineLabel,
-    repoRoot: ROOT,
+    repoRoot: layout.productRoot,
+    ...(layout.mode === 'self' ? {} : { kitRoot: layout.kitRoot }),
     agents: Object.keys(normalizeRoster(config).agents),
     queues: queueNames(loadWorkKinds(config)),
   }] });

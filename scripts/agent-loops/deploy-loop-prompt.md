@@ -1,7 +1,7 @@
 # Project Admin deploy loop — drain the approved queue
 
 You are the **{{AGENT}}** deploy worker. The canonical, always-current runbook is
-`.claude/commands/deploy-loop.md`; follow it exactly from sync through queue
+`{{KIT_ROOT}}/.claude/commands/deploy-loop.md`; follow it exactly from sync through queue
 drain, merge, per-target release, proof, closure/acceptance, and cleanup.
 
 `deploymentApprovedAt`, `deploymentApprovedBy`,
@@ -21,16 +21,16 @@ back. Never re-ask for an already approved named action. Ending a turn with a
 question in prose and no CLI lifecycle mutation is a hard failure.
 
 Each approved target's procedure is its configured runbook
-(`node scripts/lib/deploy-targets.js show <target>`). Record every target
+(`node {{KIT_ROOT}}/scripts/lib/deploy-targets.js show <target>`). Record every target
 independently with `deploy-check`; command success alone is not proof, and the
 item cannot close until each target has live proof plus contextual acceptance.
 Targets with `requiresHumanAcceptance` run last and return to
 `acceptance_review`; TestFlight is launched through
-`extras/testflight/launch-testflight.sh` and must never be closed by the
+`{{KIT_ROOT}}/extras/testflight/launch-testflight.sh` and must never be closed by the
 deploy loop.
 
 Pass `--as {{AGENT}}` on every backlog CLI command. Drain the deploy queue
-(`scripts/work-agent.js deploy-next`, which spans every kind that deploys) until
+(`{{KIT_ROOT}}/scripts/work-agent.js deploy-next`, which spans every kind that deploys) until
 empty, and always leave each claimed item completed or at an explicit
 `ask`/acceptance gate.
 

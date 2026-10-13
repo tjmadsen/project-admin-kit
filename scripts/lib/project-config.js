@@ -4,7 +4,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { normalizeRoster } = require('./agent-roster');
 
+// The kit directory. In the default layout it is also the product repository;
+// see scripts/lib/layout.js for PRODUCT_ROOT when it is not.
 const ROOT = path.resolve(__dirname, '../..');
+const KIT_ROOT = ROOT;
 const CONFIG_PATH = process.env.PROJECT_ADMIN_CONFIG || path.join(ROOT, 'project-admin.config.json');
 const BACKEND_TYPES = Object.freeze(['firestore', 'local', 'github']);
 const FIREBASE_WEB_KEYS = Object.freeze(['apiKey', 'authDomain', 'storageBucket', 'messagingSenderId', 'appId']);
@@ -67,6 +70,11 @@ function validateProjectConfig(config, source = CONFIG_PATH) {
   } catch (error) {
     throw new Error(`${error.message} (${source})`);
   }
+  try {
+    require('./layout').validateLayout(config.layout);
+  } catch (error) {
+    throw new Error(`${error.message} (${source})`);
+  }
   // Lazy require: work-kinds.js itself loads this module.
   if (config.workKinds !== undefined) require('./work-kinds').resolveWorkKinds(config.workKinds);
   // Deploy targets (new `targets` map or the legacy boolean map), the loop
@@ -82,4 +90,9 @@ function validateProjectConfig(config, source = CONFIG_PATH) {
   return config;
 }
 
-module.exports = { BACKEND_TYPES, CONFIG_PATH, FIREBASE_WEB_KEYS, ROOT, loadProjectConfig, resolveBackend, validateProjectConfig };
+// Kit and product roots for a loaded config (docs/LAYOUTS.md).
+function resolveProjectLayout(config = loadProjectConfig()) {
+  return require('./layout').resolveLayout(config);
+}
+
+module.exports = { BACKEND_TYPES, CONFIG_PATH, FIREBASE_WEB_KEYS, KIT_ROOT, ROOT, loadProjectConfig, resolveBackend, resolveProjectLayout, validateProjectConfig };

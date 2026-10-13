@@ -19,7 +19,7 @@ function copyKit(t) {
   for (const relative of [
     'project-admin.config.json', 'firebase.json', 'public/index.html',
     'extras/functions/project-config.json', 'extras/native-ios/ProjectAdminConfig.json',
-    'scripts/configure.js', 'scripts/project-env.js', 'scripts/lib/project-config.js',
+    'scripts/configure.js', 'scripts/project-env.js', 'scripts/lib/project-config.js', 'scripts/lib/layout.js',
     'scripts/lib/agent-roster.js', 'scripts/lib/agent-defaults.json',
     'scripts/lib/work-kinds.js', 'scripts/lib/work-kinds.defaults.json',
     'scripts/lib/deploy-targets.js', 'scripts/lib/deploy-targets.defaults.json', 'scripts/lib/automation.js',

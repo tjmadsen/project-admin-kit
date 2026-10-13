@@ -3,22 +3,26 @@
 Deploy-target runbook read by the deploy loop (`.claude/commands/deploy-loop.md`)
 for every approved release that names this target. `$DEPLOY_WT`, `$ITEM_REF`,
 `$ITEM_ID`, `$AGENT`, `$ITEM_CLI`, and `$MERGED_SHA` come from that runbook's
-merge step; project values come from `scripts/project-env.js shell`.
+merge step, as is `$DEPLOY_KIT` (the kit at the merged commit; the same
+directory as `$DEPLOY_WT` unless the kit is embedded or separate,
+`docs/LAYOUTS.md`); project values come from `$KIT_ROOT/scripts/project-env.js shell`.
 
 **Preconditions:** Use this for the Firebase-hosted marketing site or React admin console at
 `$PRODUCTION_URL`. The approved notes must name the affected route and a
 distinctive string from its committed output. Admin source changes must include
-the generated `public/admin` bundle in the merged commit.
+the generated `public/<adminPath>` bundle in the merged commit. This deploys the
+kit's `firebase.json` (from `$DEPLOY_KIT`); when the console is hosted by the
+product instead, follow the product's own hosting target (`docs/LAYOUTS.md`).
 
 ```bash
 PROJECT_ADMIN_HOSTING_ROUTE="${PRODUCTION_URL}${ADMIN_PATH}/"
 PROJECT_ADMIN_PROOF_PATTERN='<distinctive literal from the changed page or bundle>'
 
-gtimeout 15m npm --prefix "$DEPLOY_WT/admin-app" ci
-gtimeout 10m npm --prefix "$DEPLOY_WT/admin-app" test
-gtimeout 10m npm --prefix "$DEPLOY_WT/admin-app" run build
-gtimeout 2m git -C "$DEPLOY_WT" diff --exit-code -- public/admin
-gtimeout 20m bash -c 'cd "$1" && exec firebase deploy --only hosting --project "$2"' _ "$DEPLOY_WT" "$PROJECT_ID"
+gtimeout 15m npm --prefix "$DEPLOY_KIT/admin-app" ci
+gtimeout 10m npm --prefix "$DEPLOY_KIT/admin-app" test
+gtimeout 10m npm --prefix "$DEPLOY_KIT/admin-app" run build
+gtimeout 2m git -C "$DEPLOY_KIT" diff --exit-code -- "public${ADMIN_PATH}"
+gtimeout 20m bash -c 'cd "$1" && exec firebase deploy --only hosting --project "$2"' _ "$DEPLOY_KIT" "$PROJECT_ID"
 
 PROJECT_ADMIN_HOSTING_INDEX="/tmp/${ITEM_REF}-hosting-index.html"
 PROJECT_ADMIN_HOSTING_ASSET="/tmp/${ITEM_REF}-hosting-asset.js"

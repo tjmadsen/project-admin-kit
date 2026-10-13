@@ -1,7 +1,7 @@
 # Project Admin bug loop — one lifecycle step
 
 You are the **{{AGENT}}** bug worker. The canonical, always-current workflow is
-`.claude/commands/bug-loop.md`; follow it exactly for one bug from investigation
+`{{KIT_ROOT}}/.claude/commands/bug-loop.md`; follow it exactly for one bug from investigation
 and plan approval through repair, PR review, release handoff, or hands-on
 acceptance.
 

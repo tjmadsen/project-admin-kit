@@ -25,6 +25,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+// The kit checkout: units run its loop-wrapper.sh, which finds the product
+// repository itself (docs/LAYOUTS.md). `ctx.repoRoot` below is this path.
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
 const DEPLOY_INTERVAL_SECONDS = 900;
 // Labels before per-project namespacing; provision-machine.sh still removes them.

@@ -7,6 +7,12 @@ Firestore by default, a local JSON file, or GitHub Issues; see
 kinds (feature, bug, task, ...) are configured in `project-admin.config.json`
 under `workKinds`; read that file before operating on a project.
 
+The kit is usually the product repository itself, but `layout.productRoot` can
+embed it in a subdirectory of an existing product repository or keep it in a
+separate repository (`docs/LAYOUTS.md`). Paths in this file are relative to the
+kit directory (`$KIT_ROOT`); worktrees, branches, and PRs belong to the product
+repository (`$PRODUCT_ROOT`). `node scripts/project-env.js shell` exports both.
+
 ## Build and test
 
 Run every suite a change touches.
@@ -57,8 +63,8 @@ the canonical runbooks.
   local JSON store, or a GitHub issue) with a `kind` and is changed only through
   `scripts/work-agent.js --kind <kind>` (or the `feature-agent.js`/`bug-agent.js`
   shims) with `--as <agent>`. New persistence goes through `scripts/lib/store/`.
-- Build work happens in `.agent-worktrees/<agent>-<item>` based on the configured
-  default branch. Never implement a backlog item in the shared checkout.
+- Build work happens in `$PRODUCT_ROOT/.agent-worktrees/<agent>-<item>` based on
+  the configured default branch. Never implement a backlog item in the shared checkout.
 - An item's `branchName` is durable: fetch and resume it instead of recreating it.
 - Kinds with `planReview: true` (bugs by default) post an investigation and
   plan before writing code.

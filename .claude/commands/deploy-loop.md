@@ -9,8 +9,14 @@ Load the repository's project-specific names, branch, URLs, and Firebase target
 before any command:
 
 ```bash
-eval "$(node scripts/project-env.js shell)"
+eval "$(node "${PROJECT_ADMIN_KIT_ROOT:-.}/scripts/project-env.js" shell)" && cd "$PRODUCT_ROOT"
 ```
+
+`$KIT_ROOT` holds the kit's CLIs and runbooks; `$PRODUCT_ROOT` is the repository
+you change, where branches, PRs, and `.agent-worktrees/` live. They are the same
+directory unless the kit is embedded in a subdirectory of the product or is a
+separate repository (`docs/LAYOUTS.md`). Loops export both (and
+`PROJECT_ADMIN_KIT_ROOT`); by hand, run the line above from the kit directory.
 
 Drain the entire approved deploy queue, one item at a time. The immutable
 `deploymentApprovedAt`, `deploymentApprovedBy`, `deploymentApprovedTargets`, and
@@ -32,7 +38,7 @@ recorded grant or use the backlog CLI's `ask` command to hand the item back.
 Never re-ask for an already approved named action. Ending a turn with a question
 in prose and no CLI lifecycle mutation is a hard failure.
 
-All backlog state changes go through `scripts/work-agent.js`. Every command
+All backlog state changes go through `$KIT_ROOT/scripts/work-agent.js`. Every command
 uses `--as <agent>`. Refer to an item by its reference (the claimed JSON's
 `ref`, e.g. FR-N or BUG-N) in notes, never by its Firestore id. Use the id only
 as a CLI argument; item commands read the kind from the document.
@@ -44,7 +50,7 @@ From the checkout in which the loop was launched:
 ```bash
 gtimeout 2m git fetch origin "$DEFAULT_BRANCH"
 gtimeout 2m git status --short --branch
-gtimeout 2m node scripts/work-agent.js deploy-next --as <agent>
+gtimeout 2m node "$KIT_ROOT/scripts/work-agent.js" deploy-next --as <agent>
 ```
 
 The deploy queue spans every configured kind with `deploys: true` (kinds such
@@ -80,7 +86,7 @@ before running anything:
 
 ```bash
 AGENT='<agent>'
-ITEM_CLI='scripts/work-agent.js'
+ITEM_CLI="$KIT_ROOT/scripts/work-agent.js"
 ITEM_ID='<Firestore id from the claimed JSON>'
 ITEM_REF='<ref from the claimed JSON, e.g. FR-N or BUG-N>'
 PR_NUMBER='<recorded PR number>'
@@ -133,10 +139,17 @@ gtimeout 2m git fetch origin "$DEFAULT_BRANCH"
 
 MERGED_SHA="$(gtimeout 2m gh pr view "$PR_NUMBER" --json mergeCommit --jq '.mergeCommit.oid')"
 gtimeout 2m git merge-base --is-ancestor "$MERGED_SHA" "origin/$DEFAULT_BRANCH"
-DEPLOY_WT=".agent-worktrees/deploy-$(printf '%s' "$ITEM_REF" | tr '[:upper:]' '[:lower:]')"
-gtimeout 10m git worktree add --detach "$DEPLOY_WT" "origin/$DEFAULT_BRANCH"
+DEPLOY_WT="$PRODUCT_ROOT/.agent-worktrees/deploy-$(printf '%s' "$ITEM_REF" | tr '[:upper:]' '[:lower:]')"
+gtimeout 10m git -C "$PRODUCT_ROOT" worktree add --detach "$DEPLOY_WT" "origin/$DEFAULT_BRANCH"
 DEPLOY_WT="$(cd "$DEPLOY_WT" && pwd)"
+# The kit at the merged commit: inside the release worktree when the kit lives
+# in the product repository (KIT_SUBDIR "." or "ops"), else the kit checkout.
+if [[ -n "$KIT_SUBDIR" ]]; then DEPLOY_KIT="$(cd "$DEPLOY_WT/$KIT_SUBDIR" && pwd)"; else DEPLOY_KIT="$KIT_ROOT"; fi
 ```
+
+Product surfaces (Vercel, Flutter, Cloud Run, ...) deploy from `$DEPLOY_WT`;
+the kit's own surfaces (its `firebase.json`, admin bundle, rules, and extras)
+deploy from `$DEPLOY_KIT`. Both are the same directory in the default layout.
 
 If the PR is already merged, skip `gh pr checks` and `gh pr merge`, then read
 `mergeCommit` and continue. A red check, missing credential, non-mechanical
@@ -150,12 +163,12 @@ confirms `MERGED`.
 Deploy targets are configuration. `project-admin.config.json` maps each target
 id under `deployments.targets` to a label, a `runbook` markdown file, and
 optional `requiresHumanAcceptance`/`enabled` flags; built-in targets fall back to
-`scripts/lib/deploy-targets.defaults.json`, and `none` is always available.
+`$KIT_ROOT/scripts/lib/deploy-targets.defaults.json`, and `none` is always available.
 Before building the release matrix, print the definition of every approved
 target:
 
 ```bash
-gtimeout 1m node scripts/lib/deploy-targets.js show <approved-target> [<approved-target> ...]
+gtimeout 1m node "$KIT_ROOT/scripts/lib/deploy-targets.js" show <approved-target> [<approved-target> ...]
 ```
 
 Read each printed runbook in full. A runbook names the target's
@@ -208,7 +221,7 @@ has a `deploy-check`, close the item:
 
 ```bash
 gtimeout 2m node "$ITEM_CLI" complete "$ITEM_ID" --as "$AGENT" -m '<merge SHA, every target, proof, and end-to-end item outcome>'
-gtimeout 10m git worktree remove "$DEPLOY_WT"
+gtimeout 10m git -C "$PRODUCT_ROOT" worktree remove "$DEPLOY_WT"
 gtimeout 2m git fetch origin "$DEFAULT_BRANCH"
 ```
 

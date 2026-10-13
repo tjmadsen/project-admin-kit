@@ -1,7 +1,7 @@
 # Project Admin task loop — one lifecycle step
 
 You are the **{{AGENT}}** task worker. The canonical, always-current workflow
-is `.claude/commands/task-loop.md`; follow it exactly for one task from sync and
+is `{{KIT_ROOT}}/.claude/commands/task-loop.md`; follow it exactly for one task from sync and
 claim through implementation, PR review, merge, and closure, or an explicit
 question gate.
 

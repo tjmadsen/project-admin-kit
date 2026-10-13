@@ -138,3 +138,15 @@ test('refuses the shared primary checkout and anything that is not a worktree', 
   assert.equal(run([]).status, 2);
   assert.equal(run([primaryRoot, '--wet-run']).status, 2);
 });
+
+test('a separate kit (empty KIT_SUBDIR) provisions only product state; an embedded one looks under its subdirectory', (t) => {
+  const worktree = temporaryWorktree(t);
+  const separate = plan(run([worktree, '--dry-run'], { PROJECT_ADMIN_KIT_SUBDIR: '' }).stdout);
+  assert.equal(separate['kit packages'], 'skip');
+  assert.equal(separate['scripts/node_modules'], undefined, 'a separate kit runs from its own checkout');
+  assert.equal(separate['auth.env'], undefined);
+
+  const embedded = plan(run([worktree, '--dry-run'], { PROJECT_ADMIN_KIT_SUBDIR: 'ops' }).stdout);
+  assert.equal(embedded['ops/scripts'], 'skip', 'kit packages are looked up under the kit subdirectory');
+  assert.equal(embedded['ops/auth.env'], 'skip');
+});

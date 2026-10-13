@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 'use strict';
 
-const { loadProjectConfig, resolveBackend } = require('./lib/project-config');
+const { loadProjectConfig, resolveBackend, resolveProjectLayout } = require('./lib/project-config');
 
 const config = loadProjectConfig();
+const layout = resolveProjectLayout(config);
 const automation = require('./lib/automation');
 const values = {
   PROJECT_NAME: config.project.name,
@@ -23,6 +24,14 @@ const values = {
   OWNER_EMAIL: config.admin.ownerEmail,
   STATE_DIRECTORY: config.automation.stateDirectory,
   LOG_DIRECTORY_NAME: config.automation.logDirectoryName,
+  // docs/LAYOUTS.md. KIT_ROOT holds the kit's scripts; PRODUCT_ROOT is the
+  // checkout whose git repository owns branches, PRs, and .agent-worktrees/.
+  // KIT_SUBDIR is the kit's path inside a product checkout ("." when the kit is
+  // the repository, empty when it is a separate repository).
+  LAYOUT: layout.mode,
+  KIT_ROOT: layout.kitRoot,
+  PRODUCT_ROOT: layout.productRoot,
+  KIT_SUBDIR: layout.kitSubdir,
 };
 // Host-dependent values are computed only when asked for, so `shell` and `json`
 // stay cheap and deterministic.

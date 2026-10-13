@@ -15,8 +15,10 @@ set -euo pipefail
 ACTION="${1:-check}"
 OPTION="${2:-}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-PROJECT_ENV="$REPO_ROOT/scripts/project-env.js"
+# The kit checkout whose loop-wrapper.sh every job runs; worktrees are made in
+# the product checkout (PRODUCT_ROOT, docs/LAYOUTS.md).
+KIT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PROJECT_ENV="$KIT_ROOT/scripts/project-env.js"
 SCHEDULER="${PROJECT_ADMIN_SCHEDULER:-$(node "$PROJECT_ENV" value SCHEDULER)}"
 MACHINE_ID="${PROJECT_ADMIN_MACHINE_ID:-$(node "$PROJECT_ENV" value MACHINE_ID)}"
 export PROJECT_ADMIN_MACHINE_ID="$MACHINE_ID"
@@ -27,7 +29,7 @@ LAUNCHD_PREFIX="com.projectadmin.$SLUG.loop."
 SYSTEMD_PREFIX="projectadmin-$SLUG-loop-"
 LAUNCH_DIR="$HOME/Library/LaunchAgents"
 SYSTEMD_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
-AGENTS_HELPER="$REPO_ROOT/scripts/lib/agents.js"
+AGENTS_HELPER="$KIT_ROOT/scripts/lib/agents.js"
 UNITS="$SCRIPT_DIR/schedulers/index.js"
 # Tests and CI set this to skip the live readiness check and the Firestore reap.
 OFFLINE="${PROJECT_ADMIN_PROVISION_OFFLINE:-}"
@@ -87,6 +89,15 @@ check() {
   done < <(node "$SCRIPT_DIR/roster-check.js" --agents "$MACHINE_ID" | tr ',' '\n')
   check_binary timeout timeout || check_binary gtimeout gtimeout || failed=1
   check_scheduler || failed=1
+  local product_root layout
+  product_root="$(node "$PROJECT_ENV" value PRODUCT_ROOT)"
+  layout="$(node "$PROJECT_ENV" value LAYOUT)"
+  if git -C "$product_root" rev-parse --git-dir >/dev/null 2>&1 && git -C "$product_root" remote get-url origin >/dev/null 2>&1; then
+    echo "✓ Product    $product_root ($layout layout)"
+  else
+    echo "✗ Product    $product_root is not a git checkout with an origin remote (layout.productRoot, docs/LAYOUTS.md)"
+    failed=1
+  fi
   [[ -x "$SCRIPT_DIR/loop-wrapper.sh" ]] && echo "✓ Wrapper    loop-wrapper.sh is executable" || { echo "✗ Wrapper    scripts/agent-loops/loop-wrapper.sh missing or not executable"; failed=1; }
   if [[ "$(uname -s)" == "Darwin" ]]; then
     command -v taskpolicy >/dev/null 2>&1 && echo "✓ taskpolicy loops re-exec at normal QoS" || echo "⚠ taskpolicy missing — loops stay pinned to the E-cores"
@@ -97,7 +108,7 @@ check() {
     echo "✗ Firestore  run: gcloud auth application-default login"
     failed=1
   fi
-  [[ -d "$REPO_ROOT/scripts/node_modules/@google-cloud/firestore" ]] && echo "✓ Node deps  Firestore SDK installed" || { echo "✗ Node deps  run: cd scripts && npm install"; failed=1; }
+  [[ -d "$KIT_ROOT/scripts/node_modules/@google-cloud/firestore" ]] && echo "✓ Node deps  Firestore SDK installed" || { echo "✗ Node deps  run: cd scripts && npm install"; failed=1; }
   [[ -n "$(node "$SCRIPT_DIR/roster-check.js" --list "$MACHINE_ID")" ]] && echo "✓ Roster    $MACHINE_ID is entitled to $(node "$SCRIPT_DIR/roster-check.js" --agents "$MACHINE_ID")" || { echo "✗ Roster    machine-roster.json has no entry for $MACHINE_ID"; failed=1; }
   node "$SCRIPT_DIR/log-run.js" machine-heartbeat --machine "$MACHINE_ID" >/dev/null 2>&1 && echo "✓ Heartbeat  Firestore write succeeded" || { echo "✗ Heartbeat  Firestore write failed"; failed=1; }
   local deploy_agent
@@ -111,7 +122,7 @@ check() {
 # so a machine provisioned before per-project names migrates on its next
 # install; a legacy plist pointing at another checkout is left alone.
 legacy_plist_is_ours() {
-  [[ "$(basename "$1")" == com.projectadmin.loop.* ]] && grep -qF "$REPO_ROOT/scripts/agent-loops/loop-wrapper.sh" "$1"
+  [[ "$(basename "$1")" == com.projectadmin.loop.* ]] && grep -qF "$KIT_ROOT/scripts/agent-loops/loop-wrapper.sh" "$1"
 }
 
 launchd_uninstall() {

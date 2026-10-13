@@ -3,7 +3,9 @@
 Deploy-target runbook read by the deploy loop (`.claude/commands/deploy-loop.md`)
 for every approved release that names this target. `$DEPLOY_WT`, `$ITEM_REF`,
 `$ITEM_ID`, `$AGENT`, `$ITEM_CLI`, and `$MERGED_SHA` come from that runbook's
-merge step; project values come from `scripts/project-env.js shell`.
+merge step, as is `$DEPLOY_KIT` (the kit at the merged commit; the same
+directory as `$DEPLOY_WT` unless the kit is embedded or separate,
+`docs/LAYOUTS.md`); project values come from `$KIT_ROOT/scripts/project-env.js shell`.
 
 **Preconditions:** Needs the optional Functions extra (`extras/functions/`,
 firestore backend only); `firebase.json` in the kit points `functions.source`
@@ -17,7 +19,7 @@ PROJECT_ADMIN_FUNCTION_NAMES=('<name>' '<name>')
 
 gtimeout 15m npm --prefix "$DEPLOY_KIT/extras/functions" ci
 gtimeout 10m npm --prefix "$DEPLOY_KIT/extras/functions" test
-gtimeout 30m bash -c 'cd "$1" && exec firebase deploy --only "$2" --project "$3"' _ "$DEPLOY_WT" "$PROJECT_ADMIN_FUNCTION_FILTER" "$PROJECT_ID"
+gtimeout 30m bash -c 'cd "$1" && exec firebase deploy --only "$2" --project "$3"' _ "$DEPLOY_KIT" "$PROJECT_ADMIN_FUNCTION_FILTER" "$PROJECT_ID"
 gtimeout 5m firebase functions:list --project "$PROJECT_ID" --json > "/tmp/${ITEM_REF}-functions.json"
 for function_name in "${PROJECT_ADMIN_FUNCTION_NAMES[@]}"; do
   gtimeout 2m jq -e --arg name "$function_name" '.result[] | select(.id == $name or .entryPoint == $name)' "/tmp/${ITEM_REF}-functions.json"

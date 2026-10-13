@@ -13,6 +13,17 @@
 | `extras/native-ios/` | Optional authenticated SwiftUI/WKWebView wrapper (firestore backend) |
 | `extras/testflight/` | Optional TestFlight upload, launch, and App Store Connect polling |
 
+## Layouts
+
+`project-admin.config.json#layout.productRoot` places the kit relative to the
+product repository its agents change: the same repository (default), a
+subdirectory of it (embedded), or a separate checkout. `scripts/lib/layout.js`
+resolves `KIT_ROOT`, `PRODUCT_ROOT`, and `KIT_SUBDIR`; `project-env.js` exports
+them to runbooks and shell scripts. Git operations and `.agent-worktrees/`
+always use the product root; kit scripts run from the kit copy inside a product
+worktree, or from the kit checkout when it is separate. See
+[LAYOUTS.md](LAYOUTS.md).
+
 ## Backlog store
 
 `project-admin.config.json#backend` selects where the backlog and loop

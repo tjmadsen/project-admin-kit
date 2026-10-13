@@ -8,8 +8,14 @@ argument-hint: "[sol|terra|luna|opus|sonnet|fable|grok]"
 Load the repository's project-specific names and targets before any command:
 
 ```bash
-eval "$(node scripts/project-env.js shell)"
+eval "$(node "${PROJECT_ADMIN_KIT_ROOT:-.}/scripts/project-env.js" shell)" && cd "$PRODUCT_ROOT"
 ```
+
+`$KIT_ROOT` holds the kit's CLIs and runbooks; `$PRODUCT_ROOT` is the repository
+you change, where branches, PRs, and `.agent-worktrees/` live. They are the same
+directory unless the kit is embedded in a subdirectory of the product or is a
+separate repository (`docs/LAYOUTS.md`). Loops export both (and
+`PROJECT_ADMIN_KIT_ROOT`); by hand, run the line above from the kit directory.
 
 You are the task worker identified by `$ARGUMENTS`. Tasks are the configured
 work kind with `deploys: false`: chores, research, audits, docs, and repository
@@ -27,7 +33,7 @@ because a prose question cannot reach the project owner.
 
 1. Read `AGENTS.md`, then run `git fetch origin "$DEFAULT_BRANCH"`.
 2. Claim the owned item with
-   `node scripts/work-agent.js --kind task next --as <agent>`.
+   `node "$KIT_ROOT/scripts/work-agent.js" --kind task next --as <agent>`.
 3. Stop on `{"none":true}`. Otherwise read the full description, attachments,
    PR fields, messages, and `approvedGate`.
 4. Refer to the item as TASK-N (the claimed JSON's `ref`), never by its
@@ -49,15 +55,15 @@ because a prose question cannot reach the project owner.
 - If required information is ambiguous or missing, ask instead of guessing.
   Offer concrete lettered options ("A) ... B) ... C) ...") so the project owner can answer with
   a single letter, then run
-  `node scripts/work-agent.js ask <id> --as <agent> -m "..."` and stop.
+  `node "$KIT_ROOT/scripts/work-agent.js" ask <id> --as <agent> -m "..."` and stop.
 - Research, audits, and other work with no code change: post the result in the
   thread and close the task with `close-no-deploy` (section 4). Attach any
   evidence with `--images`.
 - For a repository change, set up an isolated worktree:
 
-  1. `git worktree add .agent-worktrees/<agent>-task-N "origin/$DEFAULT_BRANCH" -b <agent>/task-N`
+  1. `git -C "$PRODUCT_ROOT" worktree add "$PRODUCT_ROOT/.agent-worktrees/<agent>-task-N" "origin/$DEFAULT_BRANCH" -b <agent>/task-N`
      for a fresh item, or resume the recorded branch as described below.
-  2. `scripts/agent-loops/provision-worktree.sh .agent-worktrees/<agent>-task-N`
+  2. `"$KIT_ROOT/scripts/agent-loops/provision-worktree.sh" "$PRODUCT_ROOT/.agent-worktrees/<agent>-task-N"`
      — a fresh checkout has no `auth.env` and no `node_modules`, so the backlog
      CLI and every suite fail there until this runs. It is idempotent, so run it
      on resume too; `--dry-run` prints the plan without touching anything.
@@ -77,7 +83,7 @@ because a prose question cannot reach the project owner.
 - Commit, push, and open or update the PR with `gh`. Record it with:
 
 ```bash
-node scripts/work-agent.js pr <id> --as <agent> \
+node "$KIT_ROOT/scripts/work-agent.js" pr <id> --as <agent> \
   --url <url> --number <number> --branch <branch> \
   -m "tests and concise summary"
 ```
@@ -99,7 +105,7 @@ A red check, merge conflict, or missing permission is an `ask` handback with
 concrete options; never force-push or bypass a red check. Then close the task:
 
 ```bash
-node scripts/work-agent.js close-no-deploy <id> --as <agent> \
+node "$KIT_ROOT/scripts/work-agent.js" close-no-deploy <id> --as <agent> \
   -m "Merged PR #N as <merge SHA>; what changed and where the result lives"
 ```
 
