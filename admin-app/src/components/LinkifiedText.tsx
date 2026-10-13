@@ -1,9 +1,10 @@
 import { Fragment, type ReactNode } from 'react'
 import { itemRef, matchesItemReference } from '../lib/format'
 import type { WorkItem } from '../lib/types'
+import { WORK_KINDS } from '../lib/work-kinds'
 
 const httpUrlPattern = /\bhttps?:\/\/[^\s<>"']+/gi
-const itemReferencePattern = /\b(FR-\d+|BUG-\d+)\b/g
+const itemReferencePattern = new RegExp(`\\b((?:${WORK_KINDS.map((kind) => kind.prefix).join('|')})-\\d+)\\b`, 'g')
 const sentencePunctuationPattern = /[.,!?;:]$/
 const bracketPairs = new Map([
   [')', '('],
@@ -67,8 +68,8 @@ function itemReferenceTokens(text: string, items: WorkItem[], onSelectItem: (ite
   return tokens
 }
 
-// Renders bare https URLs and FR-N/BUG-N references as links. FR-N/BUG-N
-// only linkify when both `items` and `onSelectItem` are given and the
+// Renders bare https URLs and item references (FR-N, BUG-N, or any configured
+// kind prefix) as links. References only linkify when both `items` and `onSelectItem` are given and the
 // reference resolves; unresolved references render as plain text.
 export default function LinkifiedText({ text, items, onSelectItem }: { text: string; items?: WorkItem[]; onSelectItem?: (item: WorkItem) => void }) {
   const tokens = [...urlTokens(text), ...(items && onSelectItem ? itemReferenceTokens(text, items, onSelectItem) : [])].sort((a, b) => a.start - b.start)

@@ -1,0 +1,42 @@
+{
+  "feature": {
+    "label": "Feature request",
+    "pluralLabel": "Feature Requests",
+    "shortLabel": "Features",
+    "prefix": "FR",
+    "route": "features",
+    "planReview": false,
+    "deploys": true,
+    "runbook": ".claude/commands/feature-loop.md",
+    "statuses": { "initial": "backlog", "done": "shipped", "declined": "declined" },
+    "icon": "spark",
+    "tone": "green",
+    "copy": {
+      "eyebrow": "Product backlog",
+      "adminDescription": "Shape, assign, and ship the next useful improvements.",
+      "collaboratorDescription": "Submit ideas and follow their progress.",
+      "createLabel": "request",
+      "statDetail": "queued"
+    }
+  },
+  "bug": {
+    "label": "Bug",
+    "pluralLabel": "Bugs",
+    "shortLabel": "Bugs",
+    "prefix": "BUG",
+    "route": "bugs",
+    "planReview": true,
+    "deploys": true,
+    "runbook": ".claude/commands/bug-loop.md",
+    "statuses": { "initial": "open", "done": "closed", "declined": "wont_fix" },
+    "icon": "bug",
+    "tone": "amber",
+    "copy": {
+      "eyebrow": "Triage queue",
+      "adminDescription": "Capture defects, approve repair plans, and follow fixes to production.",
+      "collaboratorDescription": "Report defects and follow their progress.",
+      "createLabel": "bug",
+      "statDetail": "critical"
+    }
+  }
+}

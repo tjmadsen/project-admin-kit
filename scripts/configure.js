@@ -4,6 +4,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { ROOT, CONFIG_PATH, loadProjectConfig } = require('./lib/project-config');
+const { loadWorkKinds, syncDerivedFiles } = require('./lib/work-kinds');
 
 const FLAG_PATHS = {
   name: ['project', 'name'], shortName: ['project', 'shortName'], slug: ['project', 'slug'],
@@ -93,6 +94,8 @@ function main() {
     queues: ['feature', 'bug', 'deploy'],
   }] });
   updateMarketingPage(config);
+  // Rules, Functions, and the iOS wrapper carry generated copies of workKinds.
+  syncDerivedFiles({ root: ROOT, kinds: loadWorkKinds(config) });
   console.log(`Configured ${config.project.name}. Next: npm run install:all, firebase login, then npm run bootstrap-admin.`);
 }
 

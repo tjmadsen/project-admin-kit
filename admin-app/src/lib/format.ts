@@ -1,6 +1,7 @@
 import type { Owner, ReviewGate, WaitingOn, WorkItem } from './types'
 import { agentByOwner } from './agents'
 import { projectConfig } from './project-config'
+import { workKindOrFallback } from './work-kinds'
 
 type TimestampLike = { toDate?: () => Date; seconds?: number }
 
@@ -67,7 +68,7 @@ export function deploymentLabel(type?: string) {
 }
 
 export function itemRef(kind: string, number: number) {
-  return kind === 'feature' ? `FR-${number}` : `BUG-${number}`
+  return `${workKindOrFallback(kind).prefix}-${number}`
 }
 
 export function matchesItemReference(item: WorkItem, reference: string | null) {

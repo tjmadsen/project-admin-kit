@@ -9,6 +9,7 @@ import { db } from '../lib/firebase'
 import { formatRelative, toDate } from '../lib/format'
 import type { AgentLoopRun, AgentLoopUsageEntry } from '../lib/types'
 import { projectConfig } from '../lib/project-config'
+import { workKindForReference, workKindPath } from '../lib/work-kinds'
 
 const USAGE_STALE_MS = 50 * 60_000
 // A run heartbeats every minute, so six minutes of silence means the runner is
@@ -44,13 +45,11 @@ export function formatLoopDuration(run: Pick<AgentLoopRun, 'durationSeconds' | '
   return `${seconds}s`
 }
 
+// The reference prefix (FR-29, TASK-3) identifies the kind and so its route.
 export function runItemPath(run: Pick<AgentLoopRun, 'activeCollection' | 'activeItem'>) {
-  if (!run.activeItem) return null
-  const collection = run.activeCollection
-    || (/^FR-/i.test(run.activeItem) ? 'featureRequests' : /^BUG-/i.test(run.activeItem) ? 'bugs' : null)
-  if (!collection) return null
-  const route = collection === 'featureRequests' ? '/features' : '/bugs'
-  return `${route}?item=${encodeURIComponent(run.activeItem)}`
+  const kind = workKindForReference(run.activeItem)
+  if (!run.activeItem || !kind) return null
+  return `${workKindPath(kind)}?item=${encodeURIComponent(run.activeItem)}`
 }
 
 export function usageStatus(entry: AgentLoopUsageEntry | null, now = Date.now()): 'current' | 'stale' | 'unavailable' | 'missing' {

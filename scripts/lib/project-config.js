@@ -18,6 +18,8 @@ function loadProjectConfig() {
   ]) {
     if (!value || typeof value !== 'string') throw new Error(`Missing ${label} in ${CONFIG_PATH}`);
   }
+  // Lazy require: work-kinds.js itself loads this module.
+  if (config.workKinds !== undefined) require('./work-kinds').resolveWorkKinds(config.workKinds);
   return config;
 }
 

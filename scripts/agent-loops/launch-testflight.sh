@@ -4,7 +4,7 @@
 # launchd does not inherit the interactive shell environment.
 set -euo pipefail
 
-[[ "$#" -ge 4 ]] || { echo "Usage: $0 <featureRequests|bugs> <docId> <agent> <worktree> [label] [upload-script] [bundle-id]" >&2; exit 2; }
+[[ "$#" -ge 4 ]] || { echo "Usage: $0 <workItems> <docId> <agent> <worktree> [label] [upload-script] [bundle-id]" >&2; exit 2; }
 COLLECTION="$1"; DOC_ID="$2"; AGENT_TOKEN="$3"; ITEM_LABEL="${5:-$DOC_ID}"
 UPLOAD_SCRIPT="${6:-scripts/upload-testflight.sh}"
 BUNDLE_ID="${7:-${PROJECT_ADMIN_IOS_BUNDLE_ID:-}}"
@@ -29,9 +29,11 @@ PLIST_PATH="$PLIST_DIR/$JOB_LABEL.plist"
 mkdir -p "$LOG_DIR"
 trap 'rm -rf "$PLIST_DIR"' EXIT
 
+# Every kind lives in workItems; the legacy collection names are accepted so a
+# launch recorded before the migration still resolves. The CLI reads the kind
+# from the document itself.
 case "$COLLECTION" in
-  featureRequests) CLI="$SCRIPT_DIR/../feature-agent.js" ;;
-  bugs) CLI="$SCRIPT_DIR/../bug-agent.js" ;;
+  workItems|featureRequests|bugs) CLI="$SCRIPT_DIR/../work-agent.js" ;;
   *) echo "Invalid collection $COLLECTION" >&2; exit 2 ;;
 esac
 

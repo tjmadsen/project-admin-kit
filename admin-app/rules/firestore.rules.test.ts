@@ -26,15 +26,19 @@ const adminClaims = { email: 'owner@example.com', email_verified: true }
 const creatorClaims = { email: 'collaborator@example.com', email_verified: true }
 let testEnv: RulesTestEnvironment
 
-function creatorItem(kind: 'feature' | 'bug', number: number) {
+// Mirrors the generated block in firestore.rules for the sample workKinds.
+const initialStatus: Record<string, string> = { feature: 'backlog', bug: 'open', task: 'open' }
+const counterField: Record<string, string> = { feature: 'nextFeatureNumber', bug: 'nextBugNumber', task: 'nextTaskNumber' }
+
+function creatorItem(kind: string, number: number) {
   return {
     kind,
     number,
-    title: kind === 'feature' ? 'Creator feature' : 'Creator bug',
+    title: `Creator ${kind}`,
     description: 'Submitted from the creator-only console.',
     imageUrls: [],
     priority: 'medium',
-    status: kind === 'feature' ? 'backlog' : 'open',
+    status: initialStatus[kind] ?? 'open',
     waitingOn: 'human',
     blockedReason: 'triage',
     assignedTo: 'sol-agent',
@@ -50,16 +54,16 @@ function creatorItem(kind: 'feature' | 'bug', number: number) {
   }
 }
 
-async function submitAsCreator(kind: 'feature' | 'bug') {
+async function submitAsCreator(kind: string, overrides: Record<string, unknown> = {}) {
   const db = testEnv.authenticatedContext('logan', creatorClaims).firestore()
   return runTransaction(db, async (transaction) => {
     const counterRef = doc(db, 'system', 'counters')
     const counter = await transaction.get(counterRef)
-    const field = kind === 'feature' ? 'nextFeatureNumber' : 'nextBugNumber'
-    const number = Number(counter.data()?.[field]) + 1
-    const itemRef = doc(collection(db, kind === 'feature' ? 'featureRequests' : 'bugs'))
+    const field = counterField[kind] ?? 'nextUnknownNumber'
+    const number = Number(counter.data()?.[field] ?? 0) + 1
+    const itemRef = doc(collection(db, 'workItems'))
     transaction.set(counterRef, { [field]: number, updatedAt: serverTimestamp() }, { merge: true })
-    transaction.set(itemRef, creatorItem(kind, number))
+    transaction.set(itemRef, { ...creatorItem(kind, number), ...overrides })
     return itemRef
   })
 }
@@ -101,15 +105,15 @@ beforeEach(async () => {
     await setDoc(doc(db, 'adminUsers', creatorClaims.email), { email: creatorClaims.email, displayName: 'Collaborator', role: 'collaborator', active: true })
     await setDoc(doc(db, 'system', 'projectConfig'), { defaultWorkOwner: 'sol-agent', defaultMachineId: 'local-mac' })
     await setDoc(doc(db, 'system', 'counters'), { nextFeatureNumber: 10, nextBugNumber: 20 })
-    await setDoc(doc(db, 'featureRequests', 'existing-feature'), creatorItem('feature', 10))
-    await setDoc(doc(db, 'featureRequests', 'assigned-feature'), {
+    await setDoc(doc(db, 'workItems', 'existing-feature'), creatorItem('feature', 10))
+    await setDoc(doc(db, 'workItems', 'assigned-feature'), {
       ...creatorItem('feature', 11),
       assignedTo: 'sol-agent',
       waitingOn: 'human',
       status: 'blocked',
       blockedReason: 'question',
     })
-    await setDoc(doc(db, 'bugs', 'existing-bug'), creatorItem('bug', 20))
+    await setDoc(doc(db, 'workItems', 'existing-bug'), creatorItem('bug', 20))
     await setDoc(doc(db, 'agentLoopRuns', 'run-1'), { status: 'running' })
     await setDoc(doc(db, 'agentMachines', 'studio-1'), { status: 'online' })
     await setDoc(doc(db, 'system', 'agentLoopConfig'), { deployAgent: 'claude-sonnet' })
@@ -120,10 +124,10 @@ beforeEach(async () => {
 afterAll(async () => testEnv?.cleanup())
 
 describe('Project collaborator permissions', () => {
-  it('lets Collaborator view feature requests and bugs', async () => {
+  it('lets Collaborator view work items of every kind', async () => {
     const db = testEnv.authenticatedContext('logan', creatorClaims).firestore()
-    await assertSucceeds(getDoc(doc(db, 'featureRequests', 'existing-feature')))
-    await assertSucceeds(getDoc(doc(db, 'bugs', 'existing-bug')))
+    await assertSucceeds(getDoc(doc(db, 'workItems', 'existing-feature')))
+    await assertSucceeds(getDoc(doc(db, 'workItems', 'existing-bug')))
   })
 
   it('lets Collaborator submit a constrained feature or bug for Owner review', async () => {
@@ -136,7 +140,7 @@ describe('Project collaborator permissions', () => {
 
   it('lets Collaborator set priority while keeping model and thinking effort locked', async () => {
     const db = testEnv.authenticatedContext('logan', creatorClaims).firestore()
-    const featureRef = doc(db, 'featureRequests', 'existing-feature')
+    const featureRef = doc(db, 'workItems', 'existing-feature')
     await assertSucceeds(updateDoc(featureRef, { priority: 'critical', updatedAt: serverTimestamp() }))
     expect((await getDoc(featureRef)).data()?.priority).toBe('critical')
     await assertFails(updateDoc(featureRef, { assignedTo: 'terra-agent', updatedAt: serverTimestamp() }))
@@ -145,11 +149,11 @@ describe('Project collaborator permissions', () => {
 
   it('keeps dependency changes exclusive to Owner', async () => {
     const db = testEnv.authenticatedContext('logan', creatorClaims).firestore()
-    await assertFails(updateDoc(doc(db, 'featureRequests', 'existing-feature'), {
+    await assertFails(updateDoc(doc(db, 'workItems', 'existing-feature'), {
       dependsOn: ['existing-bug'],
       updatedAt: serverTimestamp(),
     }))
-    await assertFails(updateDoc(doc(db, 'bugs', 'existing-bug'), {
+    await assertFails(updateDoc(doc(db, 'workItems', 'existing-bug'), {
       dependsOn: ['existing-feature'],
       updatedAt: serverTimestamp(),
     }))
@@ -157,7 +161,7 @@ describe('Project collaborator permissions', () => {
 
   it('does not let Collaborator bypass Owner review on a freshly triaged item', async () => {
     const db = testEnv.authenticatedContext('logan', creatorClaims).firestore()
-    await assertFails(updateDoc(doc(db, 'featureRequests', 'existing-feature'), {
+    await assertFails(updateDoc(doc(db, 'workItems', 'existing-feature'), {
       messages: arrayUnion({
         author: 'Collaborator User',
         authorEmail: 'collaborator@example.com',
@@ -176,7 +180,7 @@ describe('Project collaborator permissions', () => {
 
   it('lets Collaborator append an authenticated note without changing workflow state', async () => {
     const db = testEnv.authenticatedContext('logan', creatorClaims).firestore()
-    const featureRef = doc(db, 'featureRequests', 'existing-feature')
+    const featureRef = doc(db, 'workItems', 'existing-feature')
     await assertSucceeds(updateDoc(featureRef, {
       messages: arrayUnion({
         author: 'Collaborator User',
@@ -193,7 +197,7 @@ describe('Project collaborator permissions', () => {
 
   it('lets Collaborator reply and return a non-deployment question to the assigned AI', async () => {
     const db = testEnv.authenticatedContext('logan', creatorClaims).firestore()
-    const featureRef = doc(db, 'featureRequests', 'assigned-feature')
+    const featureRef = doc(db, 'workItems', 'assigned-feature')
     await assertSucceeds(updateDoc(featureRef, {
       messages: arrayUnion({
         author: 'Collaborator User',
@@ -216,7 +220,7 @@ describe('Project collaborator permissions', () => {
 
   it('rejects management, forged replies, routing-only changes, and deletes from Collaborator', async () => {
     const db = testEnv.authenticatedContext('logan', creatorClaims).firestore()
-    const featureRef = doc(db, 'featureRequests', 'existing-feature')
+    const featureRef = doc(db, 'workItems', 'existing-feature')
     await assertFails(updateDoc(featureRef, { title: 'Changed' }))
     await assertFails(updateDoc(featureRef, { messages: [{ author: 'Collaborator', body: 'Reply' }] }))
     await assertFails(updateDoc(featureRef, {
@@ -248,13 +252,13 @@ describe('Project collaborator permissions', () => {
 
   it('prevents Collaborator from returning a deploy approval item to any loop', async () => {
     const adminDb = testEnv.authenticatedContext('owner-uid', adminClaims).firestore()
-    await updateDoc(doc(adminDb, 'featureRequests', 'assigned-feature'), {
+    await updateDoc(doc(adminDb, 'workItems', 'assigned-feature'), {
       status: 'ready_for_deploy',
       waitingOn: 'human',
       blockedReason: 'deploy_approval',
     })
     const db = testEnv.authenticatedContext('logan', creatorClaims).firestore()
-    await assertFails(updateDoc(doc(db, 'featureRequests', 'assigned-feature'), {
+    await assertFails(updateDoc(doc(db, 'workItems', 'assigned-feature'), {
       messages: arrayUnion({
         author: 'Collaborator User',
         authorEmail: 'collaborator@example.com',
@@ -273,7 +277,7 @@ describe('Project collaborator permissions', () => {
 
   it('rejects forged routed submissions', async () => {
     const db = testEnv.authenticatedContext('logan', creatorClaims).firestore()
-    await assertFails(setDoc(doc(db, 'featureRequests', 'forged'), {
+    await assertFails(setDoc(doc(db, 'workItems', 'forged'), {
       ...creatorItem('feature', 11),
       waitingOn: 'agent',
       assignedTo: 'codex-sol-agent',
@@ -292,19 +296,54 @@ describe('Project collaborator permissions', () => {
     await assertFails(updateDoc(doc(db, 'system', 'agentLoopUsage'), { codex: { usedPercent: 0 } }))
   })
 
+  it('lets Collaborator submit a configured kind whose counter does not exist yet', async () => {
+    const taskRef = await assertSucceeds(submitAsCreator('task'))
+    const task = (await getDoc(taskRef)).data()
+    expect(task?.kind).toBe('task')
+    expect(task?.number).toBe(1)
+    expect(task?.status).toBe('open')
+  })
+
+  it('rejects unconfigured kinds, another kind\'s initial status, and counter jumps', async () => {
+    await assertFails(submitAsCreator('epic'))
+    await assertFails(submitAsCreator('task', { status: 'backlog' }))
+    await assertFails(submitAsCreator('feature', { kind: 'bug' }))
+    const db = testEnv.authenticatedContext('logan', creatorClaims).firestore()
+    await assertFails(updateDoc(doc(db, 'system', 'counters'), { nextFeatureNumber: 12, updatedAt: serverTimestamp() }))
+    await assertFails(updateDoc(doc(db, 'system', 'counters'), { nextFeatureNumber: 11, nextBugNumber: 21, updatedAt: serverTimestamp() }))
+    await assertSucceeds(updateDoc(doc(db, 'system', 'counters'), { nextTaskNumber: 1, updatedAt: serverTimestamp() }))
+  })
+
+  it('keeps the pre-migration collections closed to collaborators', async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'featureRequests', 'legacy'), creatorItem('feature', 1))
+    })
+    const db = testEnv.authenticatedContext('logan', creatorClaims).firestore()
+    await assertFails(getDoc(doc(db, 'featureRequests', 'legacy')))
+  })
+
   it('rejects other accounts entirely', async () => {
     const db = testEnv.authenticatedContext('outsider', { email: 'someone@example.com', email_verified: true }).firestore()
-    await assertFails(getDoc(doc(db, 'featureRequests', 'existing-feature')))
+    await assertFails(getDoc(doc(db, 'workItems', 'existing-feature')))
   })
 })
 
 describe('Project administrator permissions', () => {
   it('keeps unrestricted management access for Owner', async () => {
     const db = testEnv.authenticatedContext('owner-uid', adminClaims).firestore()
-    await assertSucceeds(updateDoc(doc(db, 'featureRequests', 'existing-feature'), { waitingOn: 'agent' }))
-    await assertSucceeds(updateDoc(doc(db, 'featureRequests', 'existing-feature'), { dependsOn: ['existing-bug'] }))
-    await assertSucceeds(updateDoc(doc(db, 'bugs', 'existing-bug'), { dependsOn: ['existing-feature'] }))
+    await assertSucceeds(updateDoc(doc(db, 'workItems', 'existing-feature'), { waitingOn: 'agent' }))
+    await assertSucceeds(updateDoc(doc(db, 'workItems', 'existing-feature'), { dependsOn: ['existing-bug'] }))
+    await assertSucceeds(updateDoc(doc(db, 'workItems', 'existing-bug'), { dependsOn: ['existing-feature'] }))
     await assertSucceeds(updateDoc(doc(db, 'system', 'agentLoopConfig'), { deployAgent: 'codex-sol' }))
+  })
+
+  it('constrains administrators to configured kinds that never change', async () => {
+    const db = testEnv.authenticatedContext('owner-uid', adminClaims).firestore()
+    await assertSucceeds(setDoc(doc(db, 'workItems', 'admin-task'), { ...creatorItem('task', 5), createdByRole: 'admin' }))
+    await assertFails(setDoc(doc(db, 'workItems', 'admin-epic'), { ...creatorItem('epic', 1), createdByRole: 'admin' }))
+    await assertFails(setDoc(doc(db, 'workItems', 'admin-kindless'), { title: 'No kind' }))
+    await assertFails(updateDoc(doc(db, 'workItems', 'existing-bug'), { kind: 'feature' }))
+    await assertSucceeds(deleteDoc(doc(db, 'workItems', 'admin-task')))
   })
 
   it('lets an administrator manage access while protecting the current account', async () => {
@@ -454,6 +493,13 @@ describe('Project Admin work-item attachment permissions', () => {
     const image = storageRef(storage, 'work-item-attachments/logan/feature/existing-feature/late.png')
     await assertSucceeds(uploadBytes(image, new Uint8Array([1]), metadata('collaborator@example.com')))
     await assertSucceeds(deleteObject(image))
+  })
+
+  it('accepts attachment paths for every configured kind only', async () => {
+    const storage = testEnv.authenticatedContext('logan', creatorClaims).storage()
+    const taskMetadata = { contentType: 'image/png', customMetadata: { uploaderEmail: 'collaborator@example.com', kind: 'task', itemId: 'task-1' } }
+    await assertSucceeds(uploadBytes(storageRef(storage, 'work-item-attachments/logan/task/task-1/shot.png'), new Uint8Array([1]), taskMetadata))
+    await assertFails(uploadBytes(storageRef(storage, 'work-item-attachments/logan/epic/epic-1/shot.png'), new Uint8Array([1]), taskMetadata))
   })
 
   it('lets Owner remove a creator attachment', async () => {

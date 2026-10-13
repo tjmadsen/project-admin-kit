@@ -196,8 +196,32 @@ export const bugs: WorkItem[] = [
   },
 ]
 
+// A configured third kind that never deploys: it closes after its PR merges.
+const taskBase = { ...featureBase, kind: 'task' as const }
+
+export const tasks: WorkItem[] = [
+  {
+    ...taskBase, id: 'task-3', number: 3, priority: 'medium',
+    title: 'Rotate the staging service-account key',
+    description: 'Replace the 90-day staging key, update the CI secret, and confirm the nightly job still authenticates.',
+    status: 'in_review', waitingOn: 'human', blockedReason: 'pr_review', assignedTo: 'sol-agent',
+    prUrl: 'https://github.com/example/project/pull/41', prNumber: 41, branchName: 'sol/task-3',
+    createdAt: ts(2 * DAY), updatedAt: ts(3 * HOUR),
+    messages: [note('Codex Sol', 'PR #41 rotates the key reference and documents the procedure. Merging closes TASK-3; nothing deploys.', 3 * HOUR)],
+  },
+  {
+    ...taskBase, id: 'task-2', number: 2, priority: 'low',
+    title: 'Audit unused npm dependencies',
+    description: 'List dependencies no source file imports and propose removals.',
+    status: 'closed', waitingOn: 'done', assignedTo: 'fable-agent',
+    resolution: 'Removed four unused packages in PR #38.',
+    createdAt: ts(6 * DAY), updatedAt: ts(4 * DAY),
+    messages: [note('Claude Fable', 'Closed without deployment: Removed four unused packages in PR #38.', 4 * DAY)],
+  },
+]
+
 export const runs: AgentLoopRun[] = [
-  { id: 'run-1', agent: 'fable', queue: 'feature', machineId: 'local-mac', status: 'running', activeItem: 'FR-22', activeItemId: 'feature-22', activeCollection: 'featureRequests', thinkingEffort: 'high', startedAt: ts(90 * MIN), heartbeatAt: ts(40), progressAt: ts(2 * MIN), progressSummary: 'Implementation is complete. Running the focused Flutter widget tests before the PR handoff.' },
+  { id: 'run-1', agent: 'fable', queue: 'feature', machineId: 'local-mac', status: 'running', activeItem: 'FR-22', activeItemId: 'feature-22', activeCollection: 'workItems', thinkingEffort: 'high', startedAt: ts(90 * MIN), heartbeatAt: ts(40), progressAt: ts(2 * MIN), progressSummary: 'Implementation is complete. Running the focused Flutter widget tests before the PR handoff.' },
   { id: 'run-2', agent: 'sonnet', queue: 'deploy', machineId: 'local-mac', status: 'completed', activeItem: 'FR-18', startedAt: ts(55 * MIN), heartbeatAt: ts(41 * MIN), finishedAt: ts(41 * MIN), durationSeconds: 840, exitCode: 0, summary: 'Merged PR #29, deployed firebase_hosting, live proof recorded, FR-18 shipped.' },
   { id: 'run-3', agent: 'sol', queue: 'feature', machineId: 'local-mac', status: 'completed', activeItem: 'FR-21', startedAt: ts(4 * HOUR), heartbeatAt: ts(3 * HOUR), finishedAt: ts(3 * HOUR), durationSeconds: 2460, exitCode: 0, summary: 'PR #33 opened and recorded; item handed to pr_review.' },
   { id: 'run-4', agent: 'opus', queue: 'bug', machineId: 'local-mac', status: 'completed', activeItem: 'BUG-9', startedAt: ts(6 * HOUR), heartbeatAt: ts(5 * HOUR), finishedAt: ts(5 * HOUR), durationSeconds: 1120, exitCode: 0, summary: 'Investigation complete; plan posted for review.' },

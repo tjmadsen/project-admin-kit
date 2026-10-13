@@ -26,9 +26,10 @@ proof plus contextual acceptance. TestFlight is launched last through
 `scripts/agent-loops/launch-testflight.sh`, returns to `acceptance_review`, and
 must never be closed by the deploy loop.
 
-Pass `--as {{AGENT}}` on every backlog CLI command. Drain both feature and bug
-queues until empty, and always leave each claimed item shipped/resolved or at an
-explicit `ask`/acceptance gate.
+Pass `--as {{AGENT}}` on every backlog CLI command. Drain the deploy queue
+(`scripts/work-agent.js deploy-next`, which spans every kind that deploys) until
+empty, and always leave each claimed item completed or at an explicit
+`ask`/acceptance gate.
 
 Anything unexpected, or any step that is not a mechanical execution of the
 recorded grant, must be handed back immediately with `ask`. State exactly what

@@ -14,6 +14,7 @@ import Operations from './pages/Operations'
 import Users from './pages/Users'
 import { DetailBackProvider } from './components/DetailBackContext'
 import { projectConfig } from './lib/project-config'
+import { WORK_KINDS, workKindPath } from './lib/work-kinds'
 
 export default function App() {
   const [user, setUser] = useState<User | null | undefined>(undefined)
@@ -54,6 +55,8 @@ export default function App() {
     )
   }
 
+  // Collaborators land on the first configured work kind.
+  const collaboratorHome = workKindPath(WORK_KINDS[0])
   const actorName = user.displayName?.trim()
     || (user.email?.toLowerCase() === projectConfig.admin.ownerEmail.toLowerCase()
       ? projectConfig.admin.ownerName
@@ -63,14 +66,13 @@ export default function App() {
     <DetailBackProvider>
       <Layout user={user} role={role}>
         <Routes>
-          <Route path="/" element={role === 'admin' ? <Dashboard /> : <Navigate to="/features" replace />} />
-          <Route path="/features" element={<WorkItems kind="feature" canManage={role === 'admin'} actorEmail={user.email || ''} actorName={actorName} />} />
-          <Route path="/bugs" element={<WorkItems kind="bug" canManage={role === 'admin'} actorEmail={user.email || ''} actorName={actorName} />} />
+          <Route path="/" element={role === 'admin' ? <Dashboard /> : <Navigate to={collaboratorHome} replace />} />
+          {WORK_KINDS.map((kind) => <Route key={kind.id} path={workKindPath(kind)} element={<WorkItems key={kind.id} kind={kind.id} canManage={role === 'admin'} actorEmail={user.email || ''} actorName={actorName} />} />)}
           <Route path="/loops" element={<AgentLoops canManage={role === 'admin'} />} />
           <Route path="/activity" element={<Activity readOnly={role !== 'admin'} />} />
-          <Route path="/users" element={role === 'admin' ? <Users currentEmail={user.email || ''} /> : <Navigate to="/features" replace />} />
-          <Route path="/operations" element={role === 'admin' ? <Operations /> : <Navigate to="/features" replace />} />
-          <Route path="*" element={<Navigate to={role === 'admin' ? '/' : '/features'} replace />} />
+          <Route path="/users" element={role === 'admin' ? <Users currentEmail={user.email || ''} /> : <Navigate to={collaboratorHome} replace />} />
+          <Route path="/operations" element={role === 'admin' ? <Operations /> : <Navigate to={collaboratorHome} replace />} />
+          <Route path="*" element={<Navigate to={role === 'admin' ? '/' : collaboratorHome} replace />} />
         </Routes>
       </Layout>
     </DetailBackProvider>

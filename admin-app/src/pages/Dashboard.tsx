@@ -7,18 +7,18 @@ import { formatRelative, itemRef, ownerLabel, waitingLabel } from '../lib/format
 import { agentByToken, familyForAgent } from '../lib/agents'
 import type { WorkItem } from '../lib/types'
 import { projectConfig } from '../lib/project-config'
+import { WORK_ITEMS_COLLECTION, WORK_KINDS, isTerminalStatus, workKindOrFallback, workKindPath } from '../lib/work-kinds'
 
 export default function Dashboard() {
-  const features = useCollection<WorkItem>('featureRequests')
-  const bugs = useCollection<WorkItem>('bugs')
+  const workItems = useCollection<WorkItem>(WORK_ITEMS_COLLECTION, 500)
   const { runs } = useLoopRuns(25)
   const { machines } = useMachines()
-  const all = [...features.data, ...bugs.data].sort((a, b) => {
+  const all = [...workItems.data].sort((a, b) => {
     const av = (a.updatedAt as { seconds?: number })?.seconds ?? 0
     const bv = (b.updatedAt as { seconds?: number })?.seconds ?? 0
     return bv - av
   })
-  const active = all.filter((item) => !['shipped', 'closed', 'declined', 'wont_fix'].includes(item.status))
+  const active = all.filter((item) => !isTerminalStatus(item))
   const deploying = active.filter((item) => item.waitingOn === 'deployer')
   const needsOwner = active.filter((item) => item.waitingOn === 'human')
   const currentRuns = runs.filter((run) => run.status === 'running')
@@ -28,8 +28,10 @@ export default function Dashboard() {
     <>
       <PageHeader eyebrow="Control room" title={`Welcome, ${projectConfig.admin.ownerName}.`} description="A lean view of what needs attention and what the agents are moving forward." />
       <section className="stat-grid">
-        <Link to="/features" className="stat-card"><span>Open features</span><strong>{features.data.filter((i) => i.status !== 'shipped').length}</strong><small>{features.data.filter((i) => i.waitingOn === 'agent').length} queued for agents</small></Link>
-        <Link to="/bugs" className="stat-card amber"><span>Open bugs</span><strong>{bugs.data.filter((i) => !['closed', 'wont_fix'].includes(i.status)).length}</strong><small>{bugs.data.filter((i) => i.priority === 'critical').length} critical</small></Link>
+        {WORK_KINDS.map((kind) => {
+          const open = active.filter((item) => item.kind === kind.id)
+          return <Link to={workKindPath(kind)} className={`stat-card ${kind.tone === 'green' ? '' : kind.tone}`.trim()} key={kind.id}><span>Open {kind.shortLabel.toLowerCase()}</span><strong>{open.length}</strong><small>{kind.copy.statDetail === 'critical' ? `${open.filter((i) => i.priority === 'critical').length} critical` : `${open.filter((i) => i.waitingOn === 'agent').length} queued for agents`}</small></Link>
+        })}
         <Link to="/activity" className="stat-card blue"><span>Needs you</span><strong>{needsOwner.length}</strong><small>{deploying.length} ready to deploy</small></Link>
         <Link to="/loops" className="stat-card violet"><span>Loops running</span><strong>{currentRuns.length}</strong><small>{lastMachine ? `${lastMachine.label} ${formatRelative(lastMachine.lastSeenAt)}` : 'Awaiting first heartbeat'}</small></Link>
       </section>
@@ -37,10 +39,10 @@ export default function Dashboard() {
       <section className="dashboard-grid">
         <div className="panel">
           <div className="panel-heading"><div><p className="eyebrow">Priority queue</p><h2>Needs attention</h2></div><Link to="/activity">View all</Link></div>
-          {active.length === 0 ? <EmptyState title="The queue is clear" copy="New feature requests and bugs will appear here." /> : (
+          {active.length === 0 ? <EmptyState title="The queue is clear" copy={`New ${WORK_KINDS.map((kind) => kind.pluralLabel.toLowerCase()).join(' and ')} will appear here.`} /> : (
             <div className="item-list compact">
               {active.slice(0, 7).map((item) => (
-                <Link to={item.kind === 'feature' ? '/features' : '/bugs'} className="item-row" key={`${item.kind}-${item.id}`}>
+                <Link to={workKindPath(workKindOrFallback(item.kind))} className="item-row" key={`${item.kind}-${item.id}`}>
                   <span className={`priority-dot ${item.priority}`} />
                   <div className="item-main"><strong>{item.title}</strong><small>{itemRef(item.kind, item.number)} · {ownerLabel(item.assignedTo)}</small></div>
                   <span className={`queue-pill ${item.waitingOn}`}>{waitingLabel(item.waitingOn)}</span>

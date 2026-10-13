@@ -1,7 +1,8 @@
 # Project Admin Kit
 
 Project Admin Kit turns a new app repository into a polished operations control
-room: an admin site, feature-request and bug lifecycles,
+room: an admin site, configurable work-item lifecycles (feature requests,
+bugs, tasks, or your own kinds),
 fresh-context coding-agent loops, run monitoring, human approval gates, and
 auditable releases.
 
@@ -14,7 +15,8 @@ repository so isolated agent worktrees and PR release proofs remain coherent.
 ## Included
 
 - Responsive React/Vite dashboard with dark mode and mobile detail navigation.
-- Feature requests, bugs, dependencies, priorities, attachments, threaded
+- Configurable work kinds (feature requests, bugs, and tasks by default),
+  dependencies, priorities, attachments, threaded
   conversations, model/effort/machine routing, PR review, deploy approval, and
   acceptance actions.
 - Dynamic admin/collaborator access management in the `adminUsers` collection.

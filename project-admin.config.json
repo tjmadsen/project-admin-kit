@@ -23,6 +23,41 @@
     "slug": "owner/repository",
     "defaultBranch": "main"
   },
+  "workKinds": {
+    "feature": {
+      "label": "Feature request",
+      "pluralLabel": "Feature Requests",
+      "prefix": "FR",
+      "route": "features",
+      "planReview": false,
+      "deploys": true,
+      "runbook": ".claude/commands/feature-loop.md",
+      "statuses": { "initial": "backlog", "done": "shipped", "declined": "declined" }
+    },
+    "bug": {
+      "label": "Bug",
+      "pluralLabel": "Bugs",
+      "prefix": "BUG",
+      "route": "bugs",
+      "planReview": true,
+      "deploys": true,
+      "runbook": ".claude/commands/bug-loop.md",
+      "statuses": { "initial": "open", "done": "closed", "declined": "wont_fix" }
+    },
+    "task": {
+      "label": "Task",
+      "pluralLabel": "Tasks",
+      "prefix": "TASK",
+      "route": "tasks",
+      "planReview": false,
+      "deploys": false,
+      "runbook": ".claude/commands/task-loop.md",
+      "statuses": { "initial": "open", "done": "closed", "declined": "declined" },
+      "icon": "check",
+      "tone": "blue",
+      "copy": { "eyebrow": "Chores and research", "createLabel": "task" }
+    }
+  },
   "admin": {
     "ownerName": "Project owner",
     "ownerEmail": "owner@example.com",

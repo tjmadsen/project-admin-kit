@@ -4,6 +4,7 @@
 const { FieldValue } = require('@google-cloud/firestore');
 const db = require('./lib/firestore');
 const { loadProjectConfig } = require('./lib/project-config');
+const { loadWorkKinds } = require('./lib/work-kinds');
 
 function parseArgs(argv) {
   const command = argv[0];
@@ -19,6 +20,15 @@ function emailId(value) {
   const email = String(value || '').trim().toLowerCase();
   if (!/^\S+@\S+\.\S+$/.test(email)) throw new Error('A valid --email address is required');
   return email;
+}
+
+// Adds a zero counter for each configured kind that has none yet. Existing
+// numbering is never reset, so re-running bootstrap is safe.
+async function initializeCounters(kinds) {
+  const counterRef = db.collection('system').doc('counters');
+  const current = (await counterRef.get()).data() || {};
+  const missing = Object.fromEntries(kinds.filter((kind) => current[kind.counterField] === undefined).map((kind) => [kind.counterField, 0]));
+  await counterRef.set({ ...missing, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
 }
 
 async function add(flags) {
@@ -41,11 +51,7 @@ async function add(flags) {
       defaultMachineId: config.automation.defaultMachineId,
       updatedAt: FieldValue.serverTimestamp(),
     }, { merge: true }),
-    db.collection('system').doc('counters').set({
-      nextFeatureNumber: 0,
-      nextBugNumber: 0,
-      updatedAt: FieldValue.serverTimestamp(),
-    }, { merge: true }),
+    initializeCounters(loadWorkKinds(config)),
     db.collection('system').doc('agentLoopConfig').set({
       deployAgent: config.automation.defaultDeployAgent,
       updatedAt: FieldValue.serverTimestamp(),

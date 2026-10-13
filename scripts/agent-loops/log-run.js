@@ -5,7 +5,7 @@ const os = require('node:os');
 const { FieldValue, Timestamp } = require('@google-cloud/firestore');
 const db = require('../lib/firestore');
 const { AGENTS, resolveAgent } = require('../lib/agents');
-const { claimBelongsToRun, collectionForRun } = require('./run-claims');
+const { claimBelongsToRun, collectionForRun, runItemReference } = require('./run-claims');
 const { handoffConfirmationRequest } = require('./confirmation-handoff');
 const { reapAbandonedRuns } = require('./reap-runs');
 const { loadProjectConfig } = require('../lib/project-config');
@@ -52,7 +52,7 @@ async function releaseRunClaim(runId, rawReason) {
     }
     const item = itemSnapshot.data();
     if (!claimBelongsToRun(item, run, runId)) return;
-    const reference = run.activeItem || `${collection === 'featureRequests' ? 'FR' : 'BUG'}-${item.number ?? '?'}`;
+    const reference = runItemReference(run, item);
     const destination = run.queue === 'deploy' ? 'deploy queue' : `${agent.label} queue`;
     transaction.update(itemRef, {
       claimedBy: null,

@@ -5,8 +5,14 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { DEPLOY_TARGETS } = require('../lib/deployment-contract');
+const { loadWorkKinds } = require('../lib/work-kinds');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
+// Every configured work kind has a loop prompt shim and a canonical runbook.
+const kinds = loadWorkKinds();
+const promptFor = (kind) => `scripts/agent-loops/${kind.id}-loop-prompt.md`;
+const buildRunbooks = kinds.map((kind) => kind.runbook);
+const releaseRunbooks = kinds.filter((kind) => kind.deploys).map((kind) => kind.runbook);
 
 function read(relativePath) {
   return fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
@@ -34,8 +40,7 @@ test('canonical deploy runbook documents every deployment-contract target', () =
 test('agent-loop prompts delegate to their canonical command files', () => {
   const entries = [
     ['scripts/agent-loops/deploy-loop-prompt.md', '.claude/commands/deploy-loop.md'],
-    ['scripts/agent-loops/feature-loop-prompt.md', '.claude/commands/feature-loop.md'],
-    ['scripts/agent-loops/bug-loop-prompt.md', '.claude/commands/bug-loop.md'],
+    ...kinds.map((kind) => [promptFor(kind), kind.runbook]),
   ];
 
   for (const [promptPath, canonicalPath] of entries) {
@@ -61,13 +66,8 @@ test('deploy instructions define the headless authorization and open handback co
   }
 });
 
-test('feature and bug instructions explain their only headless human channel', () => {
-  for (const relativePath of [
-    'scripts/agent-loops/feature-loop-prompt.md',
-    'scripts/agent-loops/bug-loop-prompt.md',
-    '.claude/commands/feature-loop.md',
-    '.claude/commands/bug-loop.md',
-  ]) {
+test('every work-kind loop explains its only headless human channel', () => {
+  for (const relativePath of [...kinds.map(promptFor), ...buildRunbooks]) {
     const instructions = read(relativePath);
     assert.match(instructions, /You are headless/i);
     assert.match(instructions, /Firestore item thread is the only human channel/i);
@@ -76,8 +76,8 @@ test('feature and bug instructions explain their only headless human channel', (
   }
 });
 
-test('both build runbooks carry the worktree pre-flight, branch reuse, and note throttle', () => {
-  for (const runbook of ['.claude/commands/feature-loop.md', '.claude/commands/bug-loop.md']) {
+test('every build runbook carries the worktree pre-flight, branch reuse, and note throttle', () => {
+  for (const runbook of buildRunbooks) {
     const text = read(runbook);
     assert.match(
       text,
@@ -100,7 +100,7 @@ test('both build runbooks carry the worktree pre-flight, branch reuse, and note 
 });
 
 test('release handoffs use durable PR scope and preserve approval for mechanical conflict repair', () => {
-  for (const runbook of ['.claude/commands/feature-loop.md', '.claude/commands/bug-loop.md']) {
+  for (const runbook of releaseRunbooks) {
     const instructions = read(runbook);
     const releaseSection = instructions.slice(instructions.indexOf('deploy-pending'));
     assert.match(releaseSection, /PR number, recorded branch, approved targets\/surfaces/);
@@ -127,7 +127,7 @@ test('AGENTS.md carries the runnable test matrix and CLAUDE.md defers to it', ()
     'cd functions && npm test',
     'cd scripts && npm test',
     'firebase emulators:exec --only firestore,storage',
-    'node scripts/feature-agent.js count --as terra',
+    'node scripts/work-agent.js --kind feature count --as terra',
   ]) {
     assert.ok(agents.includes(command), `AGENTS.md test matrix must list \`${command}\``);
   }
@@ -136,4 +136,12 @@ test('AGENTS.md carries the runnable test matrix and CLAUDE.md defers to it', ()
   assert.match(agents, /\/usr\/sbin\/scutil/, 'AGENTS.md must record the PATH gotcha behind simulator host detection');
   assert.match(agents, /Autonomous fixing/, 'AGENTS.md must state the autonomous-fixing disposition');
   assert.match(read('CLAUDE.md'), /`AGENTS\.md` is the source of truth for the loop conventions/);
+});
+
+test('runbooks for kinds that never deploy contain no release handoff', () => {
+  for (const kind of kinds.filter((entry) => !entry.deploys)) {
+    const runbook = read(kind.runbook);
+    assert.doesNotMatch(runbook, /node scripts\/[\w-]+\.js deploy-pending/, `${kind.runbook} must not hand off to the deploy loop`);
+    assert.match(runbook, /close-no-deploy/, `${kind.runbook} must close through close-no-deploy`);
+  }
 });

@@ -10,7 +10,7 @@ node screenshots/capture.mjs compare ../docs/fr-N/screenshots/before ../docs/fr-
 ```
 
 - `shoot` writes `<scene>-<viewport>-<theme>.png` for the Dashboard, the feature
-  list, the FR-25 detail, Agent Loops, and (mobile only) the open navigation
+  list, the FR-25 detail, the task list (a configured kind that never deploys), Agent Loops, and (mobile only) the open navigation
   drawer, at 1440×900 and 390×844.
 - `compare` reports changed pixels and the largest per-channel delta for every
   matching file, separately for the main column (right of the 250px sidebar),

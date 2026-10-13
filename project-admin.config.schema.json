@@ -34,6 +34,123 @@
         "defaultBranch": { "type": "string", "minLength": 1 }
       }
     },
+    "workKinds": {
+      "description": "Work item kinds keyed by id. Omit for the built-in feature + bug pair. Fields left out fall back to the built-in kind with the same id (scripts/lib/work-kinds.defaults.json), then to generic defaults. Run `npm run sync:work-kinds` after editing.",
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9-]*$",
+        "not": {
+          "const": "deploy"
+        }
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Singular name, e.g. \"Feature request\""
+          },
+          "pluralLabel": {
+            "type": "string",
+            "minLength": 1
+          },
+          "shortLabel": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Compact plural for dashboards, e.g. \"Features\""
+          },
+          "prefix": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9]*$",
+            "description": "Item reference prefix, e.g. FR in FR-12"
+          },
+          "route": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$",
+            "description": "Admin URL segment; defaults to <id>s"
+          },
+          "planReview": {
+            "type": "boolean",
+            "description": "Require an investigation and plan_review gate before implementation"
+          },
+          "deploys": {
+            "type": "boolean",
+            "description": "true: release through the deploy queue; false: close with close-no-deploy"
+          },
+          "runbook": {
+            "type": "string",
+            "description": "Canonical loop runbook; defaults to .claude/commands/<id>-loop.md"
+          },
+          "statuses": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "initial": {
+                "enum": [
+                  "backlog",
+                  "open"
+                ]
+              },
+              "done": {
+                "enum": [
+                  "shipped",
+                  "closed"
+                ]
+              },
+              "declined": {
+                "enum": [
+                  "declined",
+                  "wont_fix"
+                ]
+              }
+            }
+          },
+          "icon": {
+            "enum": [
+              "spark",
+              "bug",
+              "check"
+            ]
+          },
+          "tone": {
+            "enum": [
+              "green",
+              "amber",
+              "blue",
+              "violet"
+            ]
+          },
+          "copy": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "eyebrow": {
+                "type": "string"
+              },
+              "adminDescription": {
+                "type": "string"
+              },
+              "collaboratorDescription": {
+                "type": "string"
+              },
+              "createLabel": {
+                "type": "string",
+                "description": "Noun on the create button, e.g. \"request\""
+              },
+              "statDetail": {
+                "enum": [
+                  "queued",
+                  "critical"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
     "admin": {
       "type": "object",
       "required": ["ownerName", "ownerEmail", "defaultCollaboratorName"],

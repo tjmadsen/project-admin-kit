@@ -1,4 +1,9 @@
 {
   "projectName": "My Project",
-  "adminURL": "https://example.com/admin/"
+  "adminURL": "https://example.com/admin/",
+  "workItemRoutes": {
+    "features": "FR",
+    "bugs": "BUG",
+    "tasks": "TASK"
+  }
 }

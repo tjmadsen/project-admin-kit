@@ -25,9 +25,12 @@ service firebase.storage {
         && currentAccess().role in ['admin', 'collaborator'];
     }
 
+    // Generated from project-admin.config.json#workKinds; never edit by hand.
+    // BEGIN GENERATED WORK KINDS: run `npm run sync:work-kinds` after editing workKinds.
     function isWorkItemKind(kind) {
-      return kind == 'feature' || kind == 'bug';
+      return kind in ['feature', 'bug', 'task'];
     }
+    // END GENERATED WORK KINDS
 
     function isSupportedWorkItemAttachment(fileName) {
       return request.resource.contentType.matches('image/.*')

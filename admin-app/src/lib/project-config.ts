@@ -1,5 +1,22 @@
 import rawConfig from '../../../project-admin.config.json'
 
+// One entry of project-admin.config.json#workKinds. Every field is optional
+// here because built-in kinds (feature, bug) fill gaps; see lib/work-kinds.ts.
+export interface WorkKindConfig {
+  label?: string
+  pluralLabel?: string
+  shortLabel?: string
+  prefix?: string
+  route?: string
+  planReview?: boolean
+  deploys?: boolean
+  runbook?: string
+  statuses?: { initial?: string; done?: string; declined?: string }
+  icon?: string
+  tone?: string
+  copy?: { eyebrow?: string; adminDescription?: string; collaboratorDescription?: string; createLabel?: string; statDetail?: 'queued' | 'critical' }
+}
+
 export interface ProjectAdminConfig {
   schemaVersion: 1
   project: {
@@ -22,6 +39,7 @@ export interface ProjectAdminConfig {
     measurementId?: string
   }
   repository: { slug: string; defaultBranch: string }
+  workKinds?: Record<string, WorkKindConfig>
   admin: { ownerName: string; ownerEmail: string; defaultCollaboratorName: string }
   automation: {
     defaultMachineId: string

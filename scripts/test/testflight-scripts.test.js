@@ -186,7 +186,7 @@ function runAutoship(t, uploadScriptBody) {
     `#!/bin/sh\nprintf "%s" "$1" > "${buildFile}"\n${uploadScriptBody}`
   );
   const result = runBash(
-    [autoshipScript, 'featureRequests', 'DOC123', 'fable', worktree, 'FR-8 test'],
+    [autoshipScript, 'workItems', 'DOC123', 'fable', worktree, 'FR-8 test'],
     { env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}`, PROJECT_ADMIN_FAKE_CALLS: calls, PROJECT_ADMIN_TESTFLIGHT_JOB_LABEL: '', PROJECT_ADMIN_IOS_BUNDLE_ID: 'com.example.product' } }
   );
   const nodeCalls = fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8') : '';

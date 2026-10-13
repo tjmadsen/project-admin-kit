@@ -1,8 +1,9 @@
 # Project Admin instructions
 
 This repository combines a product site with a Firebase-hosted operations
-console, Firestore-backed feature and bug queues, and autonomous agent loops.
-Read `project-admin.config.json` before operating on a project.
+console, Firestore-backed work queues, and autonomous agent loops. Work item
+kinds (feature, bug, task, ...) are configured in `project-admin.config.json`
+under `workKinds`; read that file before operating on a project.
 
 ## Build and test
 
@@ -15,7 +16,8 @@ Run every suite a change touches.
 | Firestore + Storage rules | `firebase emulators:exec --only firestore,storage --project demo-project-admin "cd admin-app && npm run test:rules"` | all rules tests pass |
 | Cloud Functions | `cd functions && npm test` | all tests pass |
 | Agent tooling | `cd scripts && npm test` | all tests pass |
-| Backlog credential smoke | `node scripts/feature-agent.js count --as terra` | returns a JSON count |
+| Backlog credential smoke | `node scripts/work-agent.js --kind feature count --as terra` | returns a JSON count |
+| Work-kind sync | `node scripts/lib/work-kinds.js check` | silent; run `npm run sync:work-kinds` if it reports drift |
 
 The rules suite needs both emulators. A fresh worktree has no `auth.env` or
 `node_modules`; immediately run
@@ -35,20 +37,23 @@ Node/model CLIs may be installed outside launchd's default PATH. Use
 | When touching | Read first |
 |---|---|
 | `scripts/*`, deployment code, or release configuration | `.claude/commands/deploy-loop.md` |
-| feature lifecycle behavior | `.claude/commands/feature-loop.md` |
-| bug lifecycle behavior | `.claude/commands/bug-loop.md` |
+| a work kind's lifecycle behavior | that kind's `runbook` in `workKinds` (feature: `.claude/commands/feature-loop.md`, bug: `.claude/commands/bug-loop.md`, task: `.claude/commands/task-loop.md`) |
 
 Prompt files under `scripts/agent-loops/` are entry-point shims and delegate to
 the canonical runbooks.
 
 ## Backlogs and loop agents
 
-- Feature requests and bugs live in Firestore and are changed only through
-  `scripts/feature-agent.js` and `scripts/bug-agent.js` with `--as <agent>`.
+- Every work item lives in the Firestore `workItems` collection with a `kind`
+  field and is changed only through `scripts/work-agent.js --kind <kind>` (or
+  the `feature-agent.js`/`bug-agent.js` shims) with `--as <agent>`.
 - Build work happens in `.agent-worktrees/<agent>-<item>` based on the configured
   default branch. Never implement a backlog item in the shared checkout.
 - An item's `branchName` is durable: fetch and resume it instead of recreating it.
-- Bug agents post an investigation and plan before writing code.
+- Kinds with `planReview: true` (bugs by default) post an investigation and
+  plan before writing code.
+- Kinds with `deploys: false` (tasks) never enter the deploy queue; their loop
+  merges the approved PR and closes the item with `close-no-deploy`.
 - Build loops open PRs and never deploy. The deploy loop executes only a human-
   approved target set with Scope/Commands/Verification/Acceptance notes.
 - Never edit backlog Firestore documents directly.
