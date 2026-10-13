@@ -17,7 +17,7 @@
 //              fetch at once
 //   --grace    seconds a job gets after SIGTERM before SIGKILL (default 30)
 //
-// Each job holds a lock file (<state>/scheduler/<id>.lock, containing the pid)
+// Each job holds a lock file (<state>/scheduler/<slug>-<id>.lock, with the pid)
 // for as long as this process runs, so two schedulers on one host never drive
 // the same loop; a lock whose pid is gone is taken over. A job never overlaps
 // itself: the next run starts `interval` seconds after the previous one
@@ -94,11 +94,13 @@ function releaseLock(file) {
 function loadPlan() {
   const { loadProjectConfig } = require('../lib/project-config');
   const { loadRoster, logDirectory, machineIdFor } = require('../lib/automation');
-  const { loopJobs } = require('./schedulers');
+  const { logName, loopJobs } = require('./schedulers');
   const config = loadProjectConfig();
   const roster = loadRoster();
   const machineId = machineIdFor({ config, roster });
   return {
+    slug: config.project.slug,
+    logName,
     machineId,
     jobs: loopJobs({ config, roster, machineId }),
     logDir: logDirectory(config),
@@ -144,8 +146,8 @@ function main(argv = process.argv.slice(2)) {
     entry.timer = null;
     if (stopping) return;
     const { job } = entry;
-    const out = fs.openSync(path.join(plan.logDir, `${job.agent}-${job.queue}.log`), 'a');
-    const err = fs.openSync(path.join(plan.logDir, `${job.agent}-${job.queue}.error.log`), 'a');
+    const out = fs.openSync(path.join(plan.logDir, `${plan.logName(job, plan.slug)}.log`), 'a');
+    const err = fs.openSync(path.join(plan.logDir, `${plan.logName(job, plan.slug)}.error.log`), 'a');
     const startedAt = Date.now();
     // Its own process group, so a stop reaches run-loop.sh and the agent CLI too.
     const child = spawn(wrapper, [job.agent, job.queue], {
@@ -214,7 +216,8 @@ function main(argv = process.argv.slice(2)) {
   log(`scheduling ${jobs.length} loop jobs for ${plan.machineId}${options.once ? ' (once)' : ''}; logs in ${plan.logDir}`);
   let slot = 0;
   for (const job of jobs) {
-    const lock = path.join(lockDir, `${job.id}.lock`);
+    // Namespaced by project so two projects' schedulers can share a state directory.
+    const lock = path.join(lockDir, `${plan.slug}-${job.id}.lock`);
     if (!acquireLock(lock)) {
       log(`skip ${job.id}: another scheduler holds ${lock}`);
       continue;

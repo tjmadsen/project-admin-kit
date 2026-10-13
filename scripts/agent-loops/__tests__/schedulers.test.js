@@ -15,8 +15,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const {
-  CRON_BEGIN,
-  CRON_END,
+  cronBegin,
+  cronEnd,
   cronSchedule,
   loopJobs,
   mergeCrontab,
@@ -31,7 +31,8 @@ const REPO = path.join(AGENT_LOOPS, '..', '..');
 const SNAPSHOTS = path.join(__dirname, '__snapshots__', 'schedulers');
 const CONFIG = JSON.parse(fs.readFileSync(path.join(REPO, 'project-admin.config.json'), 'utf8'));
 const ROSTER = { machines: [{ id: 'ci-box', agents: ['sol', 'grok', 'ghost'], queues: ['feature', 'deploy', 'release'] }] };
-const CTX = { repoRoot: '/srv/my app', machineId: 'ci-box', logDir: '/var/log/pa loops', path: '/usr/local/bin:/usr/bin:/bin' };
+const SLUG = CONFIG.project.slug;
+const CTX = { repoRoot: '/srv/my app', slug: 'rocket', machineId: 'ci-box', logDir: '/var/log/pa loops', path: '/usr/local/bin:/usr/bin:/bin' };
 
 function matchSnapshot(name, actual) {
   const file = path.join(SNAPSHOTS, name);
@@ -56,15 +57,16 @@ test('systemd units match their snapshots', () => {
   const jobs = loopJobs({ config: CONFIG, roster: ROSTER, machineId: 'ci-box' });
   const rendered = Object.assign({}, ...jobs.map((job, index) => renderSystemd(job, CTX, index)));
   assert.deepEqual(Object.keys(rendered), [
-    'projectadmin-loop-sol-feature.service', 'projectadmin-loop-sol-feature.timer',
-    'projectadmin-loop-grok-feature.service', 'projectadmin-loop-grok-feature.timer',
-    'projectadmin-loop-configured-deploy.service', 'projectadmin-loop-configured-deploy.timer',
+    'projectadmin-rocket-loop-sol-feature.service', 'projectadmin-rocket-loop-sol-feature.timer',
+    'projectadmin-rocket-loop-grok-feature.service', 'projectadmin-rocket-loop-grok-feature.timer',
+    'projectadmin-rocket-loop-configured-deploy.service', 'projectadmin-rocket-loop-configured-deploy.timer',
   ]);
-  matchSnapshot('systemd-sol-feature.service', rendered['projectadmin-loop-sol-feature.service']);
-  matchSnapshot('systemd-grok-feature.timer', rendered['projectadmin-loop-grok-feature.timer']);
-  matchSnapshot('systemd-configured-deploy.timer', rendered['projectadmin-loop-configured-deploy.timer']);
-  assert.match(rendered['projectadmin-loop-sol-feature.service'], /^ExecStart="\/srv\/my app\/scripts\/agent-loops\/loop-wrapper\.sh" sol feature$/m);
-  assert.match(renderSystemd(jobs[0], { ...CTX, path: '/opt/100%/bin' })['projectadmin-loop-sol-feature.service'], /PATH=\/opt\/100%%\/bin/, 'systemd specifiers are escaped');
+  matchSnapshot('systemd-sol-feature.service', rendered['projectadmin-rocket-loop-sol-feature.service']);
+  matchSnapshot('systemd-grok-feature.timer', rendered['projectadmin-rocket-loop-grok-feature.timer']);
+  matchSnapshot('systemd-configured-deploy.timer', rendered['projectadmin-rocket-loop-configured-deploy.timer']);
+  assert.match(rendered['projectadmin-rocket-loop-sol-feature.service'], /^StandardOutput=append:\/var\/log\/pa loops\/rocket-sol-feature\.log$/m);
+  assert.match(rendered['projectadmin-rocket-loop-sol-feature.service'], /^ExecStart="\/srv\/my app\/scripts\/agent-loops\/loop-wrapper\.sh" sol feature$/m);
+  assert.match(renderSystemd(jobs[0], { ...CTX, path: '/opt/100%/bin' })['projectadmin-rocket-loop-sol-feature.service'], /PATH=\/opt\/100%%\/bin/, 'systemd specifiers are escaped');
 });
 
 test('the cron block matches its snapshot and staggers sub-hour schedules', () => {
@@ -84,24 +86,28 @@ test('the cron block matches its snapshot and staggers sub-hour schedules', () =
 test('the launchd plist keeps the existing label, wrapper, and RunAtLoad contract', () => {
   const [job] = loopJobs({ config: CONFIG, roster: ROSTER, machineId: 'ci-box' });
   const files = renderLaunchd(job, { ...CTX, repoRoot: '/srv/a&b' });
-  assert.deepEqual(Object.keys(files), ['com.projectadmin.loop.sol-feature.plist']);
-  const plist = files['com.projectadmin.loop.sol-feature.plist'];
+  assert.deepEqual(Object.keys(files), ['com.projectadmin.rocket.loop.sol-feature.plist']);
+  const plist = files['com.projectadmin.rocket.loop.sol-feature.plist'];
+  assert.match(plist, /<key>Label<\/key><string>com\.projectadmin\.rocket\.loop\.sol-feature<\/string>/);
+  assert.match(plist, /<key>StandardOutPath<\/key><string>\/var\/log\/pa loops\/rocket-sol-feature\.log<\/string>/);
   assert.match(plist, /<string>\/srv\/a&amp;b\/scripts\/agent-loops\/loop-wrapper\.sh<\/string>/);
   assert.match(plist, /<key>StartInterval<\/key><integer>300<\/integer>/);
   assert.match(plist, /<key>RunAtLoad<\/key><true\/>/);
   assert.match(plist, /<key>PROJECT_ADMIN_MACHINE_ID<\/key><string>ci-box<\/string>/);
 });
 
-test('merging the cron block is idempotent and leaves every other crontab line alone', () => {
-  const block = `${CRON_BEGIN}\n* * * * * echo loop\n${CRON_END}`;
-  const user = 'MAILTO=me@example.com\n15 3 * * * /usr/bin/backup';
-  const once = mergeCrontab(user, block);
+test('merging the cron block is idempotent and leaves other lines and other projects alone', () => {
+  const block = `${cronBegin('rocket')}\n* * * * * echo loop\n${cronEnd('rocket')}`;
+  const other = `${cronBegin('other-app')}\n* * * * * echo other\n${cronEnd('other-app')}`;
+  const user = `MAILTO=me@example.com\n15 3 * * * /usr/bin/backup\n${other}`;
+  const once = mergeCrontab(user, block, 'rocket');
   assert.equal(once, `${user}\n${block}\n`);
-  assert.equal(mergeCrontab(once, block), once);
-  const replaced = mergeCrontab(`${once}0 4 * * * /usr/bin/later\n`, `${CRON_BEGIN}\n*/5 * * * * echo new\n${CRON_END}`);
-  assert.equal(replaced, `${user}\n0 4 * * * /usr/bin/later\n${CRON_BEGIN}\n*/5 * * * * echo new\n${CRON_END}\n`);
-  assert.equal(stripCrontab(replaced), `${user}\n0 4 * * * /usr/bin/later`);
-  assert.equal(mergeCrontab('', block), `${block}\n`);
+  assert.equal(mergeCrontab(once, block, 'rocket'), once);
+  const replaced = mergeCrontab(`${once}0 4 * * * /usr/bin/later\n`, `${cronBegin('rocket')}\n*/5 * * * * echo new\n${cronEnd('rocket')}`, 'rocket');
+  assert.equal(replaced, `${user}\n0 4 * * * /usr/bin/later\n${cronBegin('rocket')}\n*/5 * * * * echo new\n${cronEnd('rocket')}\n`);
+  assert.equal(stripCrontab(replaced, 'rocket'), `${user}\n0 4 * * * /usr/bin/later`);
+  assert.equal(stripCrontab(replaced, 'other-app'), `MAILTO=me@example.com\n15 3 * * * /usr/bin/backup\n0 4 * * * /usr/bin/later\n${cronBegin('rocket')}\n*/5 * * * * echo new\n${cronEnd('rocket')}`);
+  assert.equal(mergeCrontab('', block, 'rocket'), `${block}\n`);
 });
 
 // --- provision-machine.sh ----------------------------------------------------
@@ -154,9 +160,9 @@ test('cron install writes one managed block idempotently, and uninstall removes 
   assert.match(first.stdout, /Installed 3 cron entries/);
   assert.match(first.stdout, /3 Project Admin loop jobs are scheduled with cron for ci-box/);
   const installed = fs.readFileSync(host.crontabFile, 'utf8');
-  assert.ok(installed.startsWith('MAILTO=me@example.com\n15 3 * * * /usr/bin/backup\n# BEGIN project-admin agent loops'), installed);
+  assert.ok(installed.startsWith(`MAILTO=me@example.com\n15 3 * * * /usr/bin/backup\n# BEGIN project-admin agent loops: ${SLUG} `), installed);
   assert.equal((installed.match(/loop-wrapper\.sh/g) || []).length, 3);
-  assert.match(installed, new RegExp(`'${REPO.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/scripts/agent-loops/loop-wrapper\\.sh' configured deploy >>'${host.root}/logs/configured-deploy\\.log'`));
+  assert.match(installed, new RegExp(`'${REPO.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/scripts/agent-loops/loop-wrapper\\.sh' configured deploy >>'${host.root}/logs/${SLUG}-configured-deploy\\.log'`));
   assert.ok(fs.existsSync(path.join(host.root, 'logs')), 'install creates the log directory');
 
   assert.equal(provision(host, 'cron', ['install']).status, 0);
@@ -173,46 +179,59 @@ test('cron install works for a user with no crontab yet', () => {
   const host = fakeHost();
   const { status, stderr } = provision(host, 'cron', ['install']);
   assert.equal(status, 0, stderr);
-  assert.match(fs.readFileSync(host.crontabFile, 'utf8'), /^# BEGIN project-admin agent loops/);
+  assert.match(fs.readFileSync(host.crontabFile, 'utf8'), new RegExp(`^# BEGIN project-admin agent loops: ${SLUG} `));
 });
 
 test('systemd install writes user units, replaces stale ones, and enables every timer', () => {
   const host = fakeHost();
   const unitDir = path.join(host.root, 'config/systemd/user');
   fs.mkdirSync(unitDir, { recursive: true });
-  fs.writeFileSync(path.join(unitDir, 'projectadmin-loop-old-bug.timer'), '[Timer]\n');
-  fs.writeFileSync(path.join(unitDir, 'projectadmin-loop-old-bug.service'), '[Service]\n');
+  fs.writeFileSync(path.join(unitDir, `projectadmin-${SLUG}-loop-old-bug.timer`), '[Timer]\n');
+  fs.writeFileSync(path.join(unitDir, `projectadmin-${SLUG}-loop-old-bug.service`), '[Service]\n');
+  fs.writeFileSync(path.join(unitDir, 'projectadmin-other-app-loop-sol-bug.timer'), '[Timer]\n');
   fs.writeFileSync(path.join(unitDir, 'unrelated.service'), '[Service]\n');
   const { status, stderr, record } = provision(host, 'systemd', ['install']);
   assert.equal(status, 0, stderr);
   assert.deepEqual(fs.readdirSync(unitDir).sort(), [
-    'projectadmin-loop-configured-deploy.service', 'projectadmin-loop-configured-deploy.timer',
-    'projectadmin-loop-grok-feature.service', 'projectadmin-loop-grok-feature.timer',
-    'projectadmin-loop-sol-feature.service', 'projectadmin-loop-sol-feature.timer',
+    'projectadmin-other-app-loop-sol-bug.timer',
+    `projectadmin-${SLUG}-loop-configured-deploy.service`, `projectadmin-${SLUG}-loop-configured-deploy.timer`,
+    `projectadmin-${SLUG}-loop-grok-feature.service`, `projectadmin-${SLUG}-loop-grok-feature.timer`,
+    `projectadmin-${SLUG}-loop-sol-feature.service`, `projectadmin-${SLUG}-loop-sol-feature.timer`,
     'unrelated.service',
-  ]);
-  assert.match(record, /systemctl --user disable --now projectadmin-loop-old-bug\.timer/);
+  ].sort());
+  assert.match(record, new RegExp(`systemctl --user disable --now projectadmin-${SLUG}-loop-old-bug\\.timer`));
+  assert.doesNotMatch(record, /other-app/, 'another project\'s units are untouched');
   assert.match(record, /systemctl --user daemon-reload/);
   for (const job of ['sol-feature', 'grok-feature', 'configured-deploy']) {
-    assert.match(record, new RegExp(`systemctl --user enable --now projectadmin-loop-${job}\\.timer`));
+    assert.match(record, new RegExp(`systemctl --user enable --now projectadmin-${SLUG}-loop-${job}\\.timer`));
   }
-  assert.match(fs.readFileSync(path.join(unitDir, 'projectadmin-loop-sol-feature.service'), 'utf8'), /Environment="PROJECT_ADMIN_MACHINE_ID=ci-box"/);
-  assert.match(provision(host, 'systemd', ['status']).stdout, /projectadmin-loop-sol-feature\.timer/);
+  assert.match(fs.readFileSync(path.join(unitDir, `projectadmin-${SLUG}-loop-sol-feature.service`), 'utf8'), /Environment="PROJECT_ADMIN_MACHINE_ID=ci-box"/);
+  assert.match(provision(host, 'systemd', ['status']).record, new RegExp(`list-timers projectadmin-${SLUG}-loop-\\*`));
 
   assert.equal(provision(host, 'systemd', ['uninstall']).status, 0);
-  assert.deepEqual(fs.readdirSync(unitDir), ['unrelated.service']);
+  assert.deepEqual(fs.readdirSync(unitDir).sort(), ['projectadmin-other-app-loop-sol-bug.timer', 'unrelated.service']);
 });
 
-test('launchd install keeps bootstrapping one plist per job', () => {
+test('launchd install bootstraps one namespaced plist per job and migrates this checkout\'s legacy labels', () => {
   const host = fakeHost();
+  const agentsDir = path.join(host.root, 'Library/LaunchAgents');
+  fs.mkdirSync(agentsDir, { recursive: true });
+  // Pre-namespacing labels: one from this checkout, one from another project.
+  fs.writeFileSync(path.join(agentsDir, 'com.projectadmin.loop.sol-bug.plist'), `<string>${REPO}/scripts/agent-loops/loop-wrapper.sh</string>`);
+  fs.writeFileSync(path.join(agentsDir, 'com.projectadmin.loop.opus-bug.plist'), '<string>/elsewhere/scripts/agent-loops/loop-wrapper.sh</string>');
+  fs.writeFileSync(path.join(agentsDir, 'com.projectadmin.other-app.loop.sol-bug.plist'), '<string>/elsewhere</string>');
   const { status, stderr, record } = provision(host, 'launchd', ['install']);
   assert.equal(status, 0, stderr);
-  assert.deepEqual(fs.readdirSync(path.join(host.root, 'Library/LaunchAgents')).sort(), [
-    'com.projectadmin.loop.configured-deploy.plist', 'com.projectadmin.loop.grok-feature.plist', 'com.projectadmin.loop.sol-feature.plist',
-  ]);
+  assert.deepEqual(fs.readdirSync(agentsDir).sort(), [
+    'com.projectadmin.loop.opus-bug.plist',
+    `com.projectadmin.${SLUG}.loop.configured-deploy.plist`, `com.projectadmin.${SLUG}.loop.grok-feature.plist`, `com.projectadmin.${SLUG}.loop.sol-feature.plist`,
+    'com.projectadmin.other-app.loop.sol-bug.plist',
+  ].sort());
+  assert.match(record, /launchctl bootout gui\/\d+\/com\.projectadmin\.loop\.sol-bug$/m, 'the legacy job is unloaded');
+  assert.doesNotMatch(record, /opus-bug|other-app/, 'other checkouts\' jobs are untouched');
   assert.equal((record.match(/^launchctl bootstrap gui\/\d+ /gm) || []).length, 3);
   assert.equal(provision(host, 'launchd', ['uninstall']).status, 0);
-  assert.deepEqual(fs.readdirSync(path.join(host.root, 'Library/LaunchAgents')), []);
+  assert.deepEqual(fs.readdirSync(agentsDir).sort(), ['com.projectadmin.loop.opus-bug.plist', 'com.projectadmin.other-app.loop.sol-bug.plist']);
 });
 
 test('a dry run prints the units without touching any scheduler', () => {

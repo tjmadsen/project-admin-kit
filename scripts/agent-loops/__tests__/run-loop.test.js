@@ -415,6 +415,27 @@ echo "RUN_LOOP_ENV: \${PROJECT_ADMIN_NOTIFY_WEBHOOK_URL:-unset}" >> ${sandbox.re
   assert.match(record, /RUN_LOOP_ENV: https:\/\/ntfy\.example\/loops/);
 });
 
+test('with project config present the wrapper lock is namespaced by project slug', () => {
+  const sandbox = makeWrapperSandbox();
+  for (const relative of ['scripts/project-env.js']) write(path.join(sandbox.repo, relative), fs.readFileSync(path.join(REPO, relative)));
+  execFileSync('git', ['add', '-A'], { cwd: sandbox.repo });
+  execFileSync('git', ['commit', '-qm', 'project env'], { cwd: sandbox.repo });
+  execFileSync('git', ['push', '-q', 'origin', 'master'], { cwd: sandbox.repo });
+  // The sandbox origin's branch is master.
+  const config = JSON.parse(fs.readFileSync(path.join(REPO, 'project-admin.config.json'), 'utf8'));
+  const configFile = path.join(sandbox.root, 'config.json');
+  write(configFile, JSON.stringify({ ...config, project: { ...config.project, slug: 'rocket' }, repository: { ...config.repository, defaultBranch: 'master' } }));
+  const env = { PROJECT_ADMIN_CONFIG: configFile };
+  fs.mkdirSync(path.join(sandbox.root, 'state/rocket-bug-loop-opus.lock'), { recursive: true });
+  fs.mkdirSync(path.join(sandbox.root, 'state/other-app-feature-loop-opus.lock'), { recursive: true });
+  const held = runWrapper(sandbox, 'opus', 'bug', env);
+  assert.match(held.stdout, /skip: a previous run still holds the lock/);
+  const free = runWrapper(sandbox, 'opus', 'feature', env);
+  assert.equal(free.status, 0, free.stderr);
+  assert.ok(fs.existsSync(path.join(sandbox.root, 'state/logs/poll-rocket-feature-opus.log')));
+  assert.match(free.record, /RUN_LOOP: agent=opus queue=feature/, "another project's lock does not block this project");
+});
+
 test('the wrapper rejects an unknown token or queue', () => {
   const sandbox = makeWrapperSandbox();
   const unknown = runWrapper(sandbox, 'nobody', 'bug');

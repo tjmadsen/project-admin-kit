@@ -13,6 +13,7 @@ const { spawn, spawnSync } = require('node:child_process');
 
 const SCHEDULER = path.join(__dirname, '..', 'scheduler.js');
 const REPO = path.join(__dirname, '..', '..', '..');
+const SLUG = JSON.parse(fs.readFileSync(path.join(REPO, 'project-admin.config.json'), 'utf8')).project.slug;
 
 function sandbox(roster = { machines: [{ id: 'ci', agents: ['sol', 'opus'], queues: ['feature', 'deploy'] }] }) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'project-admin-scheduler-'));
@@ -77,7 +78,7 @@ test('--once fires every entitled loop through the wrapper once, logs it, and re
   const starts = box.lines().filter((line) => line.startsWith('START')).map((line) => line.split(' ').slice(1, 4).join(' ')).sort();
   assert.deepEqual(starts, ['configured deploy ci', 'opus feature ci', 'sol feature ci']);
   assert.match(stdout, /all jobs finished/);
-  assert.match(fs.readFileSync(path.join(box.root, 'logs', 'sol-feature.log'), 'utf8'), /wrapper output for sol feature/);
+  assert.match(fs.readFileSync(path.join(box.root, 'logs', `${SLUG}-sol-feature.log`), 'utf8'), /wrapper output for sol feature/);
   assert.deepEqual(fs.readdirSync(box.lockDir), [], 'locks are released on exit');
 });
 
@@ -95,16 +96,19 @@ test('a job held by another live scheduler is skipped; a stale lock is taken ove
   const box = sandbox();
   fs.mkdirSync(box.lockDir, { recursive: true });
   // This test process is alive, so its pid holds sol-feature.
-  fs.writeFileSync(path.join(box.lockDir, 'sol-feature.lock'), `${process.pid}\n`);
+  fs.writeFileSync(path.join(box.lockDir, `${SLUG}-sol-feature.lock`), `${process.pid}\n`);
   // A pid that cannot exist marks opus-feature's lock as abandoned.
-  fs.writeFileSync(path.join(box.lockDir, 'opus-feature.lock'), '999999999\n');
+  fs.writeFileSync(path.join(box.lockDir, `${SLUG}-opus-feature.lock`), '999999999\n');
+  // Another project's lock for the same job id does not block this project.
+  fs.writeFileSync(path.join(box.lockDir, 'other-app-configured-deploy.lock'), `${process.pid}\n`);
   const { status, stdout, stderr } = runScheduler(box, ['--once', '--stagger', '0']);
   assert.equal(status, 0, stderr);
   assert.match(stdout, /skip sol-feature: another scheduler holds/);
   const starts = box.lines().filter((line) => line.startsWith('START')).map((line) => line.split(' ')[1]).sort();
   assert.deepEqual(starts, ['configured', 'opus']);
-  assert.equal(fs.readFileSync(path.join(box.lockDir, 'sol-feature.lock'), 'utf8'), `${process.pid}\n`, 'a lock this run never owned is left alone');
-  assert.equal(fs.existsSync(path.join(box.lockDir, 'opus-feature.lock')), false);
+  assert.equal(fs.readFileSync(path.join(box.lockDir, `${SLUG}-sol-feature.lock`), 'utf8'), `${process.pid}\n`, 'a lock this run never owned is left alone');
+  assert.equal(fs.existsSync(path.join(box.lockDir, `${SLUG}-opus-feature.lock`)), false);
+  assert.ok(fs.existsSync(path.join(box.lockDir, 'other-app-configured-deploy.lock')));
 });
 
 test('a job re-runs on its interval without overlapping itself', async () => {
@@ -142,7 +146,7 @@ test('SIGTERM stops scheduling, terminates running jobs, and releases the locks'
   let output = '';
   child.stdout.on('data', (chunk) => { output += chunk; });
   await waitFor(() => box.lines().filter((line) => line.startsWith('START')).length === 3);
-  assert.equal(fs.readdirSync(box.lockDir).length, 3, 'each running job holds its lock');
+  assert.deepEqual(fs.readdirSync(box.lockDir).sort(), [`${SLUG}-configured-deploy.lock`, `${SLUG}-opus-feature.lock`, `${SLUG}-sol-feature.lock`], 'each running job holds its namespaced lock');
   const started = Date.now();
   child.kill('SIGTERM');
   const code = await new Promise((resolve) => child.on('exit', resolve));

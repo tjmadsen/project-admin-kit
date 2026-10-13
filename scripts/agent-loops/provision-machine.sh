@@ -21,6 +21,10 @@ SCHEDULER="${PROJECT_ADMIN_SCHEDULER:-$(node "$PROJECT_ENV" value SCHEDULER)}"
 MACHINE_ID="${PROJECT_ADMIN_MACHINE_ID:-$(node "$PROJECT_ENV" value MACHINE_ID)}"
 export PROJECT_ADMIN_MACHINE_ID="$MACHINE_ID"
 LOG_DIR="$(node "$PROJECT_ENV" value LOOP_LOG_DIR)"
+# Every job name carries the project slug so several projects can share a host.
+SLUG="$(node "$PROJECT_ENV" value PROJECT_SLUG)"
+LAUNCHD_PREFIX="com.projectadmin.$SLUG.loop."
+SYSTEMD_PREFIX="projectadmin-$SLUG-loop-"
 LAUNCH_DIR="$HOME/Library/LaunchAgents"
 SYSTEMD_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 AGENTS_HELPER="$REPO_ROOT/scripts/lib/agents.js"
@@ -103,10 +107,18 @@ check() {
 
 # --- launchd -----------------------------------------------------------------
 
+# Also removes this checkout's pre-namespacing com.projectadmin.loop.* labels,
+# so a machine provisioned before per-project names migrates on its next
+# install; a legacy plist pointing at another checkout is left alone.
+legacy_plist_is_ours() {
+  [[ "$(basename "$1")" == com.projectadmin.loop.* ]] && grep -qF "$REPO_ROOT/scripts/agent-loops/loop-wrapper.sh" "$1"
+}
+
 launchd_uninstall() {
   local file label
-  for file in "$LAUNCH_DIR"/com.projectadmin.loop.*.plist; do
+  for file in "$LAUNCH_DIR/$LAUNCHD_PREFIX"*.plist "$LAUNCH_DIR"/com.projectadmin.loop.*.plist; do
     [[ -e "$file" ]] || continue
+    [[ "$(basename "$file")" != com.projectadmin.loop.* ]] || legacy_plist_is_ours "$file" || continue
     label="$(basename "$file" .plist)"
     launchctl bootout "gui/$(id -u)/$label" >/dev/null 2>&1 || true
     rm "$file"
@@ -127,9 +139,9 @@ launchd_install() {
 }
 
 launchd_status() {
-  launchctl print-disabled "gui/$(id -u)" | grep 'com\.projectadmin\.loop' || true
+  launchctl print-disabled "gui/$(id -u)" | grep -F -e "$LAUNCHD_PREFIX" -e 'com.projectadmin.loop.' || true
   local file
-  for file in "$LAUNCH_DIR"/com.projectadmin.loop.*.plist; do
+  for file in "$LAUNCH_DIR/$LAUNCHD_PREFIX"*.plist "$LAUNCH_DIR"/com.projectadmin.loop.*.plist; do
     [[ -e "$file" ]] && basename "$file"
   done
   return 0
@@ -139,11 +151,11 @@ launchd_status() {
 
 systemd_uninstall() {
   local file
-  for file in "$SYSTEMD_DIR"/projectadmin-loop-*.timer; do
+  for file in "$SYSTEMD_DIR/$SYSTEMD_PREFIX"*.timer; do
     [[ -e "$file" ]] || continue
     systemctl --user disable --now "$(basename "$file")" >/dev/null 2>&1 || true
   done
-  rm -f "$SYSTEMD_DIR"/projectadmin-loop-*.timer "$SYSTEMD_DIR"/projectadmin-loop-*.service
+  rm -f "$SYSTEMD_DIR/$SYSTEMD_PREFIX"*.timer "$SYSTEMD_DIR/$SYSTEMD_PREFIX"*.service
   systemctl --user daemon-reload
 }
 
@@ -160,7 +172,7 @@ systemd_install() {
 }
 
 systemd_status() {
-  systemctl --user list-timers 'projectadmin-loop-*' --all --no-pager || true
+  systemctl --user list-timers "$SYSTEMD_PREFIX*" --all --no-pager || true
 }
 
 # --- cron --------------------------------------------------------------------
@@ -186,7 +198,7 @@ cron_uninstall() {
 }
 
 cron_status() {
-  current_crontab | sed -n '/^# BEGIN project-admin agent loops/,/^# END project-admin agent loops/p'
+  current_crontab | sed -n "/^# BEGIN project-admin agent loops: $SLUG /,/^# END project-admin agent loops: $SLUG\$/p"
 }
 
 # --- foreground --------------------------------------------------------------

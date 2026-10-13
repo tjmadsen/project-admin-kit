@@ -6,9 +6,12 @@
 // except that all deploy entitlements collapse into the single `configured`
 // deploy dispatcher (the dashboard picks the deploy model at poll time).
 //
-//   launchd     ~/Library/LaunchAgents/com.projectadmin.loop.<agent>-<queue>.plist
-//   systemd     ~/.config/systemd/user/projectadmin-loop-<agent>-<queue>.{service,timer}
-//   cron        one marked block in the user's crontab
+//   launchd     ~/Library/LaunchAgents/com.projectadmin.<slug>.loop.<agent>-<queue>.plist
+//   systemd     ~/.config/systemd/user/projectadmin-<slug>-loop-<agent>-<queue>.{service,timer}
+//   cron        one marked block per project in the user's crontab
+//
+// Every name carries project.slug so several projects can share one host;
+// logs are <logDir>/<slug>-<agent>-<queue>.log.
 //   foreground  scheduler.js (`npm run loops`), which reads loopJobs() directly
 //
 // provision-machine.sh applies what this renders; nothing here touches the
@@ -24,10 +27,13 @@ const path = require('node:path');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
 const DEPLOY_INTERVAL_SECONDS = 900;
-const LAUNCHD_PREFIX = 'com.projectadmin.loop.';
-const SYSTEMD_PREFIX = 'projectadmin-loop-';
-const CRON_BEGIN = '# BEGIN project-admin agent loops (managed by provision-machine.sh; edits are replaced)';
-const CRON_END = '# END project-admin agent loops';
+// Labels before per-project namespacing; provision-machine.sh still removes them.
+const LEGACY_LAUNCHD_PREFIX = 'com.projectadmin.loop.';
+const launchdPrefix = (slug) => `com.projectadmin.${slug}.loop.`;
+const systemdPrefix = (slug) => `projectadmin-${slug}-loop-`;
+const cronBegin = (slug) => `# BEGIN project-admin agent loops: ${slug} (managed by provision-machine.sh; edits are replaced)`;
+const cronEnd = (slug) => `# END project-admin agent loops: ${slug}`;
+const logName = (job, slug) => `${slug}-${job.agent}-${job.queue}`;
 
 function loopJobs({ config, roster, machineId }) {
   const { entitlements } = require('../roster-check');
@@ -70,15 +76,16 @@ function shellQuote(value) {
 }
 
 function renderLaunchd(job, ctx) {
-  const values = { LABEL: `${LAUNCHD_PREFIX}${job.id}`, REPO: ctx.repoRoot, AGENT: job.agent, QUEUE: job.queue, INTERVAL: job.interval, LOGDIR: ctx.logDir, MACHINE: ctx.machineId, PATH: ctx.path };
+  const label = `${launchdPrefix(ctx.slug)}${job.id}`;
+  const values = { LABEL: label, REPO: ctx.repoRoot, AGENT: job.agent, QUEUE: job.queue, INTERVAL: job.interval, LOGDIR: ctx.logDir, LOGNAME: logName(job, ctx.slug), MACHINE: ctx.machineId, PATH: ctx.path };
   const escaped = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, escapeXml(value)]));
-  return { [`${LAUNCHD_PREFIX}${job.id}.plist`]: fill(template('launchd.plist.template'), escaped) };
+  return { [`${label}.plist`]: fill(template('launchd.plist.template'), escaped) };
 }
 
 function renderSystemd(job, ctx, index = 0) {
-  const unit = `${SYSTEMD_PREFIX}${job.id}`;
+  const unit = `${systemdPrefix(ctx.slug)}${job.id}`;
   const values = {
-    UNIT: unit, REPO: escapeSystemd(ctx.repoRoot), AGENT: job.agent, QUEUE: job.queue, INTERVAL: job.interval,
+    UNIT: unit, SLUG: ctx.slug, LOGNAME: logName(job, ctx.slug), REPO: escapeSystemd(ctx.repoRoot), AGENT: job.agent, QUEUE: job.queue, INTERVAL: job.interval,
     LOGDIR: ctx.logDir.replace(/%/g, '%%'), MACHINE: escapeSystemd(ctx.machineId), PATH: escapeSystemd(ctx.path),
     // Stagger first fires three seconds apart so twenty loops do not all start
     // their git fetch in the same instant.
@@ -111,20 +118,20 @@ function renderCronBlock(jobs, ctx) {
     WRAPPER: shellQuote(path.join(ctx.repoRoot, 'scripts/agent-loops/loop-wrapper.sh')),
     AGENT: job.agent,
     QUEUE: job.queue,
-    LOG: shellQuote(path.join(ctx.logDir, `${job.agent}-${job.queue}.log`)),
-    ERRLOG: shellQuote(path.join(ctx.logDir, `${job.agent}-${job.queue}.error.log`)),
+    LOG: shellQuote(path.join(ctx.logDir, `${logName(job, ctx.slug)}.log`)),
+    ERRLOG: shellQuote(path.join(ctx.logDir, `${logName(job, ctx.slug)}.error.log`)),
   }));
-  return [CRON_BEGIN, `# repo: ${ctx.repoRoot} machine: ${ctx.machineId}`, ...lines, CRON_END].join('\n');
+  return [cronBegin(ctx.slug), `# repo: ${ctx.repoRoot} machine: ${ctx.machineId}`, ...lines, cronEnd(ctx.slug)].join('\n');
 }
 
-// Drops the managed block (and only it) from a crontab, keeping every other
-// line in place.
-function stripCrontab(existing) {
+// Drops this project's managed block (and only it) from a crontab, keeping
+// every other line, including other projects' blocks, in place.
+function stripCrontab(existing, slug) {
   const out = [];
   let inside = false;
   for (const line of String(existing || '').split('\n')) {
-    if (line === CRON_BEGIN) { inside = true; continue; }
-    if (inside) { if (line === CRON_END) inside = false; continue; }
+    if (line === cronBegin(slug)) { inside = true; continue; }
+    if (inside) { if (line === cronEnd(slug)) inside = false; continue; }
     out.push(line);
   }
   return out.join('\n').replace(/\n+$/, '');
@@ -132,8 +139,8 @@ function stripCrontab(existing) {
 
 // Replaces the managed block wherever it was, appending it on first install.
 // Running it twice yields the same crontab.
-function mergeCrontab(existing, block) {
-  const kept = stripCrontab(existing);
+function mergeCrontab(existing, block, slug) {
+  const kept = stripCrontab(existing, slug);
   return `${kept ? `${kept}\n` : ''}${block}\n`;
 }
 
@@ -145,7 +152,7 @@ function contextFromEnv() {
   const machineId = machineIdFor({ config, roster });
   return {
     jobs: loopJobs({ config, roster, machineId }),
-    ctx: { repoRoot: REPO_ROOT, machineId, logDir: logDirectory(config), path: process.env.PATH || '/usr/bin:/bin' },
+    ctx: { repoRoot: REPO_ROOT, slug: config.project.slug, machineId, logDir: logDirectory(config), path: process.env.PATH || '/usr/bin:/bin' },
   };
 }
 
@@ -164,16 +171,16 @@ function writeFiles(dir, files) {
 
 function main(argv = process.argv.slice(2)) {
   const [command, kind, dir] = argv;
+  const { jobs, ctx } = contextFromEnv();
   if (command === 'crontab-strip') {
-    const stripped = stripCrontab(readStdin());
+    const stripped = stripCrontab(readStdin(), ctx.slug);
     process.stdout.write(stripped ? `${stripped}\n` : '');
     return;
   }
-  const { jobs, ctx } = contextFromEnv();
   if (command === 'jobs') {
     for (const job of jobs) console.log(`${job.id} ${job.agent} ${job.queue} ${job.interval}`);
   } else if (command === 'crontab-merge') {
-    process.stdout.write(mergeCrontab(readStdin(), renderCronBlock(jobs, ctx)));
+    process.stdout.write(mergeCrontab(readStdin(), renderCronBlock(jobs, ctx), ctx.slug));
   } else if (command === 'render' && kind === 'cron') {
     console.log(renderCronBlock(jobs, ctx));
   } else if (command === 'render' && (kind === 'launchd' || kind === 'systemd') && dir) {
@@ -185,18 +192,20 @@ function main(argv = process.argv.slice(2)) {
 }
 
 module.exports = {
-  CRON_BEGIN,
-  CRON_END,
   DEPLOY_INTERVAL_SECONDS,
-  LAUNCHD_PREFIX,
-  SYSTEMD_PREFIX,
+  LEGACY_LAUNCHD_PREFIX,
+  cronBegin,
+  cronEnd,
   cronSchedule,
+  launchdPrefix,
+  logName,
   loopJobs,
   mergeCrontab,
   renderCronBlock,
   renderLaunchd,
   renderSystemd,
   stripCrontab,
+  systemdPrefix,
 };
 
 if (require.main === module) {

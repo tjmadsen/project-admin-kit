@@ -54,14 +54,17 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 if [[ -f "$REPO_ROOT/scripts/project-env.js" ]]; then
   DEFAULT_BRANCH="$(node "$REPO_ROOT/scripts/project-env.js" value DEFAULT_BRANCH)"
   STATE_DIRECTORY="$(node "$REPO_ROOT/scripts/project-env.js" value STATE_DIRECTORY)"
+  PROJECT_SLUG="$(node "$REPO_ROOT/scripts/project-env.js" value PROJECT_SLUG)"
 else
   DEFAULT_BRANCH="master"
   STATE_DIRECTORY=".project-admin"
+  PROJECT_SLUG=""
 fi
 STATE_DIR="${PROJECT_ADMIN_LOOP_STATE_DIR:-$HOME/$STATE_DIRECTORY}"
 WORKTREE="$REPO_ROOT/.agent-worktrees/loop-$QUEUE-$TOKEN"
-LOCK="$STATE_DIR/$QUEUE-loop-$TOKEN.lock"
-POLL_LOG="$STATE_DIR/logs/poll-$QUEUE-$TOKEN.log"
+# Prefixed by project slug: projects on one host often share ~/.project-admin.
+LOCK="$STATE_DIR/${PROJECT_SLUG:+$PROJECT_SLUG-}$QUEUE-loop-$TOKEN.lock"
+POLL_LOG="$STATE_DIR/logs/poll-${PROJECT_SLUG:+$PROJECT_SLUG-}$QUEUE-$TOKEN.log"
 
 mkdir -p "$STATE_DIR" "$STATE_DIR/logs"
 

@@ -52,7 +52,7 @@ On macOS the wrapper re-execs once under `taskpolicy -a` (so
 `ProcessType=Background` cannot pin the whole process tree to the E-cores). It
 sources the optional `~/<stateDirectory>/loops.env` (for per-host secrets such
 as a webhook URL or a container's CLI API keys), holds a single-instance lock
-per `(queue,token)` under `~/.project-admin`, refreshes a dedicated
+per `(project,queue,token)` under `~/.project-admin`, refreshes a dedicated
 `.agent-worktrees/loop-<queue>-<token>` checkout to the configured default branch, links the
 gitignored `node_modules` installs, and runs that checkout's `run-loop.sh`. No
 loop ever works in the shared primary checkout.
@@ -152,13 +152,18 @@ the same job set from `schedulers/index.js`, with templates beside it:
 
 | Scheduler | Default on | What `install` does | Logs |
 |---|---|---|---|
-| `launchd` | macOS | one `~/Library/LaunchAgents/com.projectadmin.loop.<agent>-<queue>.plist` per job, `RunAtLoad`, `StartInterval` | `~/Library/Logs/ProjectAdminAgentLoops` |
-| `systemd` | Linux | one user `projectadmin-loop-<agent>-<queue>.service` (oneshot) + `.timer` (`OnActiveSec` staggered, `OnUnitActiveSec` = interval) in `~/.config/systemd/user`, then `enable --now` | `~/.local/state/ProjectAdminAgentLoops` |
-| `cron` | — | one marked `# BEGIN/END project-admin agent loops` block in your crontab, replaced in place on every install; other lines are untouched | same as systemd |
+| `launchd` | macOS | one `~/Library/LaunchAgents/com.projectadmin.<slug>.loop.<agent>-<queue>.plist` per job, `RunAtLoad`, `StartInterval` | `~/Library/Logs/ProjectAdminAgentLoops` |
+| `systemd` | Linux | one user `projectadmin-<slug>-loop-<agent>-<queue>.service` (oneshot) + `.timer` (`OnActiveSec` staggered, `OnUnitActiveSec` = interval) in `~/.config/systemd/user`, then `enable --now` | `~/.local/state/ProjectAdminAgentLoops` |
+| `cron` | — | one marked `# BEGIN/END project-admin agent loops: <slug>` block in your crontab, replaced in place on every install; other lines are untouched | same as systemd |
 | `foreground` | other platforms | nothing; run `npm run loops` (below) | same as systemd |
 
-`install` removes the previous loop jobs first, so it is idempotent and drops
-jobs the roster no longer entitles. User systemd timers stop at logout unless
+Every job name, lock, and log file (`<logDir>/<slug>-<agent>-<queue>.log`)
+carries `project.slug`, so several projects can share one host; `install`,
+`status`, and `uninstall` only touch the current project's jobs. `install`
+removes the previous loop jobs first, so it is idempotent and drops jobs the
+roster no longer entitles. On macOS it also unloads and deletes this checkout's
+pre-namespacing `com.projectadmin.loop.*` plists, so an existing machine
+migrates on its next install (legacy plists of other checkouts are left alone). User systemd timers stop at logout unless
 you run `loginctl enable-linger $USER` (the `check` warns). cron is
 minute-granular: sub-hour intervals that divide the hour are offset per job
 (`2-59/5`), others round to `*/N`, and nothing fires at install time until the
@@ -195,7 +200,7 @@ npm run loops -- --only sol-feature,configured-deploy --stagger 10
 Windows through WSL. It runs the same job set through `loop-wrapper.sh`, starts
 jobs `--stagger` seconds apart (default 5), and starts each job's next run one
 interval after the previous run started (immediately if it ran longer), never
-overlapping a job with itself. Each job holds `~/<stateDirectory>/scheduler/<id>.lock`
+overlapping a job with itself. Each job holds `~/<stateDirectory>/scheduler/<slug>-<id>.lock`
 while the scheduler runs, so two schedulers on one host never drive the same
 loop; a lock whose pid is gone is taken over. SIGINT/SIGTERM stops scheduling,
 sends SIGTERM to every running job's process group, escalates to SIGKILL after
