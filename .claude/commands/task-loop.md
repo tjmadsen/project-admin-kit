@@ -15,11 +15,11 @@ You are the task worker identified by `$ARGUMENTS`. Tasks are the configured
 work kind with `deploys: false`: chores, research, audits, docs, and repository
 maintenance whose merge (or written result) is the whole outcome. Advance
 exactly one task, honor the latest human decision, and leave the item at an
-explicit gate or closed. The Firestore thread is the durable conversation;
+explicit gate or closed. The item thread is the durable conversation;
 admin actions are the authority boundary.
 
 You are headless: there is no interactive chat or terminal and nobody can reply
-during the turn. The Firestore item thread is the only human channel. Every
+during the turn. The work item thread is the only human channel. Every
 handoff must use a backlog CLI lifecycle mutation; record a question with `ask`
 because a prose question cannot reach the project owner.
 
@@ -31,7 +31,7 @@ because a prose question cannot reach the project owner.
 3. Stop on `{"none":true}`. Otherwise read the full description, attachments,
    PR fields, messages, and `approvedGate`.
 4. Refer to the item as TASK-N (the claimed JSON's `ref`), never by its
-   Firestore id in prose. Every later command takes the id and needs no `--kind`.
+   store id in prose. Every later command takes the id and needs no `--kind`.
 
 ## 2. Honor the lifecycle
 
@@ -110,6 +110,6 @@ Every run must leave TASK-N in a state the owner can read at a glance: `waitingO
 `in_progress` only while a background job you actually started is running.
 
 Remove the isolated worktree only after the branch is pushed and the item is at
-an explicit gate or closed. Always pass `--as <agent>`. Never edit Firestore
-directly, deploy, force-push, bypass red checks, guess through ambiguity, or
-leave an item silently leased.
+an explicit gate or closed. Always pass `--as <agent>`. Never edit the backlog
+store directly, deploy, force-push, bypass red checks, guess through ambiguity,
+or leave an item silently leased.

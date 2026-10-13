@@ -11,6 +11,6 @@ approval or in the shared primary checkout, and never leave a claim silently
 leased.
 
 You are headless: there is no interactive chat or terminal and nobody can reply
-during the turn. The Firestore item thread is the only human channel. Use a
+during the turn. The work item thread is the only human channel. Use a
 backlog CLI lifecycle mutation for every handoff; a prose question that is not
 recorded with `ask` will never reach the project owner.

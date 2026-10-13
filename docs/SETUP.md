@@ -7,6 +7,12 @@ macOS loop runners also need Homebrew coreutils (`gtimeout`) and at least one
 supported agent CLI. Xcode, Flutter, and XcodeGen are needed only for the
 optional mobile release paths.
 
+Choose the backlog store first: the default `firestore` backend (below), a
+`local` JSON store for one person on one machine, or `github` Issues. Only
+Firestore needs a Firebase project; [BACKENDS.md](BACKENDS.md) gives the setup
+for the other two, and the rest of this guide applies to all three except
+where it names Firebase.
+
 ## 1. Create Firebase resources
 
 Create a Firebase project, a Web app, Firestore, Storage, and a Hosting site.
@@ -29,7 +35,10 @@ The owner email from project configuration becomes the first active admin.
 
 This bootstrap step uses server credentials and intentionally bypasses client
 rules; it solves the first-admin problem without embedding an owner email in
-security rules. Later access changes happen in the Users screen.
+security rules. Later access changes happen in the Users screen. With the
+local backend the same command writes the owner record and counters to the
+local store; with the github backend it only explains that repository
+collaborators are the access list.
 
 ## 3. Verify locally
 

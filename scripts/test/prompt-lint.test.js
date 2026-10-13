@@ -70,7 +70,7 @@ test('every work-kind loop explains its only headless human channel', () => {
   for (const relativePath of [...kinds.map(promptFor), ...buildRunbooks]) {
     const instructions = read(relativePath);
     assert.match(instructions, /You are headless/i);
-    assert.match(instructions, /Firestore item thread is the only human channel/i);
+    assert.match(instructions, /work item thread is the only human channel/i);
     assert.match(instructions, /prose question/i);
     assert.match(instructions, /`ask`/i);
   }
