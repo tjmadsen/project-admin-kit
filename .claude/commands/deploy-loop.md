@@ -178,12 +178,14 @@ gtimeout 2m node "$ITEM_CLI" deploy-check "$ITEM_ID" --as "$AGENT" \
 The CLI refuses `complete` (or `ship`/`resolve`) whenever an approved target
 requires human acceptance. Follow that target's runbook to hand the item back:
 TestFlight's autoship records its own proof and returns the item to
-`acceptance_review`. For any other such target, record its `deploy-check`, then
-move the item to the project owner instead of closing it:
+`acceptance_review`. For any other such target, record its live proof with
+`verification-pending`, which stores the evidence and moves the item to the
+project owner's acceptance review instead of closing it (record every other
+approved target with `deploy-check` first):
 
 ```bash
-gtimeout 2m node "$ITEM_CLI" set "$ITEM_ID" --as "$AGENT" \
-  --status in_review --waiting human --gate acceptance_review \
+gtimeout 2m node "$ITEM_CLI" verification-pending "$ITEM_ID" --as "$AGENT" \
+  --target '<target>' \
   -m '<merge SHA, every target, its proof, and what the project owner should try>'
 ```
 

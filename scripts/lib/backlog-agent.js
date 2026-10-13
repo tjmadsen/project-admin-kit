@@ -290,7 +290,8 @@ function createBacklogAgent({
     if (!id) throw new Error('Missing item id');
     const agent = agentFrom(flags);
     const target = requireFlag(flags, 'target');
-    normalizeDeploymentTargets([target]);
+    // Post-approval: the recorded scope governs, even if config disabled the target since.
+    normalizeDeploymentTargets([target], { allowDisabled: true });
     const proof = requireMeaningfulFlag(flags, 'proof');
     const acceptance = requireMeaningfulFlag(flags, 'acceptance');
     const ref = items().doc(id);
@@ -338,12 +339,15 @@ function createBacklogAgent({
   async function markVerificationPending(id, flags) {
     const result = requireMessage(flags);
     const agent = agentFrom(flags);
+    // Any approved target with requiresHumanAcceptance; TestFlight's autoship omits --target.
+    const target = flags.target && flags.target !== true ? flags.target : 'testflight';
     const { ref, data, kind } = await loadItem(id);
     requireDeploys(kind);
-    requireApprovedTarget(data, 'testflight');
+    requireApprovedTarget(data, target);
+    if (targetsRequiringHumanAcceptance([target]).length === 0) throw new Error(`verification-pending is only for targets with requiresHumanAcceptance; record ${target} with deploy-check`);
     const evidence = {
       ...(data.deploymentEvidence || {}),
-      testflight: {
+      [target]: {
         proof: result,
         acceptance: `The build is available for ${OWNER_NAME} to test against the work-item acceptance context.`,
         verifiedAt: Timestamp.now(),
@@ -357,7 +361,7 @@ function createBacklogAgent({
       deploymentInProgressTarget: null, claimedBy: null, claimRunId: null, leaseExpiresAt: null,
       messages: FieldValue.arrayUnion(message(agent.label, result)), updatedAt: FieldValue.serverTimestamp(),
     });
-    json({ ok: true, id, ref: itemReference(kinds, data), target: 'testflight', status: 'in_review' });
+    json({ ok: true, id, ref: itemReference(kinds, data), target, status: 'in_review' });
   }
 
   async function completeItem(id, flags, verb) {

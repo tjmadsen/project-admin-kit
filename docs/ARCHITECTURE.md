@@ -73,8 +73,8 @@ maps each target id (`^[a-z][a-z0-9_]*$`) to a definition:
 |---|---|
 | `label` | console and CLI name |
 | `runbook` | repository-relative markdown with the target's preconditions, time-bounded commands, live proof, and known failures |
-| `requiresHumanAcceptance` | the deploy loop records proof but the CLI refuses `complete`; the item returns to acceptance review |
-| `enabled` | `false` hides it from the console picker and rejects new `--targets` selections; recorded scopes still resolve |
+| `requiresHumanAcceptance` | the CLI refuses `complete`; the deploy loop records proof with `verification-pending --target <id>`, which returns the item to acceptance review |
+| `enabled` | `false` hides it from the console picker and rejects new `--targets` selections; already-approved scopes still deploy, record proof, and close |
 
 ```json
 "deployments": {
