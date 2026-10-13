@@ -1,8 +1,11 @@
 {
   "name": "project-admin-kit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "A reusable Firebase admin console and autonomous agent operations platform.",
+  "bin": {
+    "create-project-admin": "scripts/create-project-admin.js"
+  },
   "engines": {
     "node": ">=20"
   },
@@ -12,6 +15,8 @@
     "local": "node scripts/local-server.js",
     "sync:work-kinds": "node scripts/lib/work-kinds.js sync",
     "migrate:work-items": "node scripts/migrate-work-items.js",
+    "kit:upgrade": "node scripts/kit-upgrade.js",
+    "kit:install-into": "node scripts/install-into.js",
     "loops": "node scripts/agent-loops/scheduler.js",
     "build": "npm --prefix admin-app run build",
     "test": "npm run test:admin && npm run test:agents",

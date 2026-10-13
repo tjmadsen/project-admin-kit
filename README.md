@@ -42,7 +42,7 @@ repository so isolated agent worktrees and PR release proofs remain coherent.
 ## Start a new project
 
 ```bash
-git clone <this-repository> my-new-app
+node <this-kit>/scripts/create-project-admin.js my-new-app   # or: git clone <this-repository> my-new-app
 cd my-new-app
 npm run configure -- \
   --name "My New App" \
@@ -74,6 +74,18 @@ revoke people from **Admin → Users**.
 
 See [docs/SETUP.md](docs/SETUP.md) for the full first-run checklist and
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the data and trust model.
+
+## Existing product repositories and upgrades
+
+The kit does not have to be the product repository.
+`node scripts/install-into.js <product-repo> [--dir ops] [--mode embedded|separate]`
+copies it into a subdirectory of an existing repository or beside it as its own
+repository; agent worktrees, branches, and PRs then belong to the product
+repository ([docs/LAYOUTS.md](docs/LAYOUTS.md)). Every copy records
+`.project-admin/kit-lock.json`, so `npm run kit:upgrade -- --from <kit git URL or path>`
+can later 3-way merge upstream fixes into kit-owned files without touching
+project-owned ones ([docs/UPGRADING.md](docs/UPGRADING.md),
+[CHANGELOG.md](CHANGELOG.md)). Nothing is published to npm.
 
 ## Local development
 
