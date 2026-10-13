@@ -185,7 +185,7 @@ export function deploymentApprovalIssue(item: Pick<WorkItem, 'prNumber' | 'prUrl
   if (!deploymentNotesReady(notes)) return 'Complete the Scope, Commands, Verification, and Acceptance sections in deploy notes.'
   const value = notes?.trim() || ''
   const notedPrs = [...value.matchAll(/\bPR\s*#\s*(\d+)\b/gi)].map((match) => Number(match[1]))
-  const mismatchedPr = item.prNumber && notedPrs.find((number) => number !== item.prNumber)
+  const mismatchedPr = item.prNumber && notedPrs.length > 0 && !notedPrs.includes(item.prNumber) ? notedPrs[0] : undefined
   if (mismatchedPr) return `Deploy notes name PR #${mismatchedPr}, but the linked pull request is PR #${item.prNumber}. Refresh the deploy notes.`
   if (item.deploymentNotes === notes) {
     if (item.deploymentNotesPrNumber && item.prNumber && item.deploymentNotesPrNumber !== item.prNumber) {

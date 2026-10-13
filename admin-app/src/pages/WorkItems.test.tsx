@@ -50,6 +50,7 @@ const item: WorkItem = {
 
 const approvable: WorkItem = { ...item, assignedTo: 'sol-agent', status: 'in_review', waitingOn: 'human', blockedReason: 'pr_review', prUrl: 'https://github.com/example/repo/pull/42' }
 const validDeploymentNotes = 'Scope: Release the affected admin surface from PR #42.\nCommands: Build admin and deploy Hosting in that order.\nVerification: Open the production admin route and inspect the current asset.\nAcceptance: Complete the workflow and observe the expected saved result.'
+const multiPrDeploymentNotes = 'Scope: Release the affected admin surface through PR #43, including merged implementation PR #42.\nCommands: Fetch PR #43, build admin, and deploy Hosting in that order.\nVerification: Open the production admin route and inspect the current asset.\nAcceptance: Complete the workflow and observe the expected saved result.'
 
 function usePhoneDetailLayout() {
   window.matchMedia = vi.fn().mockImplementation((query: string) => ({
@@ -983,8 +984,11 @@ describe('deployment handoff contract', () => {
     expect(firestore.updateDoc.mock.calls[0][1]).toMatchObject({
       waitingOn: 'deployer',
       status: 'ready_for_deploy',
+      blockedReason: null,
       deploymentApprovedTargets: ['firebase_hosting'],
       deploymentApprovedNotes: validDeploymentNotes,
+      deploymentApprovedAt: 'server-timestamp',
+      deploymentApprovedBy: 'owner@example.com',
     })
   })
 
@@ -992,8 +996,15 @@ describe('deployment handoff contract', () => {
     const linked = { ...item, prNumber: 42, prUrl: 'https://github.com/example/repo/pull/42', branchName: 'sol/fr-42' }
     expect(deploymentApprovalIssue(linked, validDeploymentNotes)).toBeUndefined()
     expect(deploymentApprovalIssue(linked, validDeploymentNotes.replace('PR #42', 'PR #30'))).toContain('PR #30')
+    expect(deploymentApprovalIssue({ ...linked, deploymentNotes: validDeploymentNotes, deploymentNotesPrNumber: 30 }, validDeploymentNotes)).toContain('PR #30')
     expect(deploymentApprovalIssue({ ...linked, deploymentNotes: validDeploymentNotes, deploymentNotesPrUrl: 'https://github.com/example/repo/pull/30' }, validDeploymentNotes)).toContain('URL changed')
     expect(deploymentApprovalIssue({ ...linked, deploymentNotes: validDeploymentNotes, deploymentNotesBranchName: 'sol/old-branch' }, validDeploymentNotes)).toContain('branch changed')
+  })
+
+  it('accepts deploy notes that identify the linked PR alongside an earlier implementation PR', () => {
+    const linked = { ...item, prNumber: 43, prUrl: 'https://github.com/example/repo/pull/43', branchName: 'sol/fr-1' }
+    expect(deploymentApprovalIssue(linked, multiPrDeploymentNotes)).toBeUndefined()
+    expect(deploymentApprovalIssue(linked, multiPrDeploymentNotes.replaceAll('PR #43', 'PR #42'))).toContain('PR #42')
   })
 
   it('disables both deploy approval buttons when notes name a stale PR', async () => {
@@ -1140,6 +1151,42 @@ describe('one-tap approval', () => {
     fireEvent.click(itemActions.getByRole('button', { name: /Complete deploy notes/i }))
     expect(container.querySelector('.reply-tools')).not.toHaveAttribute('open')
     expect(firestore.updateDoc).not.toHaveBeenCalled()
+  })
+
+  it('approves a current-plus-prior PR deploy handoff from the phone action', async () => {
+    usePhoneDetailLayout()
+    state.data = [{
+      ...approvable,
+      status: 'ready_for_deploy',
+      waitingOn: 'human',
+      blockedReason: 'deploy_approval',
+      prNumber: 43,
+      prUrl: 'https://github.com/example/repo/pull/43',
+      branchName: 'sol/fr-1',
+      deploymentTargets: ['firebase_hosting'],
+      deploymentNotes: multiPrDeploymentNotes,
+    }]
+    window.history.replaceState({}, '', '/admin/features?item=FR-1')
+    render(<WorkItems kind="feature" canManage actorEmail="owner@example.com" />)
+
+    const approvalActions = await screen.findAllByRole('button', { name: /Approve Firebase Hosting → deploy/i })
+    expect(approvalActions).toHaveLength(2)
+    approvalActions.forEach((button) => expect(button).toBeEnabled())
+    expect(screen.queryByRole('button', { name: /Refresh deploy notes/i })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByText('Reply tools', { exact: false }))
+    const itemActions = within(screen.getByRole('region', { name: 'Item actions' }))
+    fireEvent.click(itemActions.getByRole('button', { name: /Approve Firebase Hosting → deploy/i }))
+
+    await waitFor(() => expect(firestore.updateDoc).toHaveBeenCalledTimes(1))
+    expect(firestore.updateDoc.mock.calls[0][1]).toMatchObject({
+      waitingOn: 'deployer',
+      status: 'ready_for_deploy',
+      blockedReason: null,
+      deploymentApprovedTargets: ['firebase_hosting'],
+      deploymentApprovedNotes: multiPrDeploymentNotes,
+      deploymentApprovedAt: 'server-timestamp',
+      deploymentApprovedBy: 'owner@example.com',
+    })
   })
 
   it.each([
