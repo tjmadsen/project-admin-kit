@@ -102,7 +102,8 @@ test('the EXIT trap turns a fatal shell error into a non-zero exit in bash 3.2',
     assert.ok(block, `${name} defines cleanup/finish/trap`);
     const prelude = `set -euo pipefail\nBUILD_DIR="$(mktemp -d "${buildDir}/b.XXXXXX")"\n${block[0]}\n`;
     const cases = [
-      { body: 'A=()\necho "${A[@]}"\nUPLOAD_COMPLETE=1\n', expect: 1, label: 'unbound variable' },
+      // An unset name is fatal under set -u in every bash; an empty array only in 3.2.
+      { body: 'echo "$PROJECT_ADMIN_UNSET_FOR_TEST"\nUPLOAD_COMPLETE=1\n', expect: 1, label: 'unbound variable' },
       { body: 'f() { return 3; }\nf\nUPLOAD_COMPLETE=1\n', expect: 3, label: 'set -e failure' },
       { body: 'exit 2\n', expect: 2, label: 'explicit exit code' },
       { body: 'echo done\n', expect: 1, label: 'exited 0 before completion' },

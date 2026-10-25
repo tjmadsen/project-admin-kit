@@ -19,7 +19,9 @@ resets_epoch="$(printf '%s' "$line" | grep -oE '"resets_at":[0-9]+' | grep -oE '
 
 resets_iso=""
 if [[ -n "$resets_epoch" ]]; then
-  resets_iso="$(date -u -r "$resets_epoch" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || true)"
+  # BSD date (macOS) takes -r <epoch>; GNU date (Linux) reads -r as a file.
+  resets_iso="$(date -u -r "$resets_epoch" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null \
+    || date -u -d "@$resets_epoch" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || true)"
 fi
 
 args=(usage --provider codex --used-percent "$used_percent")
