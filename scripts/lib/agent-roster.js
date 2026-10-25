@@ -14,7 +14,14 @@ const RESERVED_TOKENS = Object.freeze(['configured']);
 const RUNNERS = DEFAULTS.runners;
 const PROMPT_VIA = Object.freeze(['arg', 'stdin']);
 const PLACEHOLDERS = Object.freeze(['prompt', 'prompt_file', 'model', 'effort', 'repo']);
-const AGENT_KEYS = Object.freeze(['token', 'label', 'short', 'emoji', 'runner', 'model', 'claimsUnassigned', 'pollSeconds', 'sandbox', 'usage', 'command', 'promptVia']);
+const AGENT_KEYS = Object.freeze(['token', 'label', 'short', 'emoji', 'runner', 'model', 'claimsUnassigned', 'pollSeconds', 'sandbox', 'usage', 'command', 'promptVia', 'efforts', 'pinModel']);
+// Every thinking effort any supported CLI accepts, low to high. Each runner's
+// default `efforts` (agent-defaults.json) is the exact set its CLI accepts:
+// `codex debug models` reports per-model `supported_reasoning_levels`, `claude
+// --effort` documents low..max, and grok's active model advertises low..xhigh.
+// An agent overrides it when its model's menu differs (luna's gpt-5.6 build
+// lacks "ultra"). A CLI that changes its menu invalidates these until rechecked.
+const EFFORT_ORDER = Object.freeze(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
 
 function fail(message) {
   throw new Error(`Invalid agent roster: ${message}`);
@@ -55,6 +62,16 @@ function normalizeCommand(entry, where) {
   return { command: [...command], promptVia };
 }
 
+function normalizeEfforts(entry, runner, where) {
+  const efforts = entry.efforts === undefined ? runner.efforts || EFFORT_ORDER.slice(2, 5) : entry.efforts;
+  if (!Array.isArray(efforts) || efforts.length === 0) fail(`${where}.efforts must be a non-empty array`);
+  for (const effort of efforts) {
+    if (!EFFORT_ORDER.includes(effort)) fail(`${where}.efforts has unknown effort "${effort}"; use ${EFFORT_ORDER.join(', ')}`);
+  }
+  // Menus render low to high regardless of how the config lists them.
+  return Object.freeze(EFFORT_ORDER.filter((effort) => efforts.includes(effort)));
+}
+
 function normalizeAgent(entry, index) {
   const where = `agents[${index}]`;
   if (!entry || typeof entry !== 'object' || Array.isArray(entry)) fail(`${where} must be an object`);
@@ -69,6 +86,7 @@ function normalizeAgent(entry, index) {
   const runner = RUNNERS[entry.runner];
   if (!runner) fail(`${where}.runner "${entry.runner}" is not one of ${Object.keys(RUNNERS).join(', ')}`);
   if (entry.claimsUnassigned !== undefined && typeof entry.claimsUnassigned !== 'boolean') fail(`${where}.claimsUnassigned must be a boolean`);
+  if (entry.pinModel !== undefined && typeof entry.pinModel !== 'boolean') fail(`${where}.pinModel must be a boolean`);
   if (entry.pollSeconds !== undefined && !(Number.isInteger(entry.pollSeconds) && entry.pollSeconds > 0)) fail(`${where}.pollSeconds must be a positive integer`);
 
   let sandbox = null;
@@ -95,6 +113,10 @@ function normalizeAgent(entry, index) {
     guarded: runner.guarded === true,
     pollSeconds: entry.pollSeconds || 300,
     usage: normalizeUsage(entry, runner, where),
+    efforts: normalizeEfforts(entry, runner, where),
+    // By default a loop runs the newest model in the configured model's tier
+    // (runners/README.md); pinModel launches exactly `model` instead.
+    pinModel: entry.pinModel === true,
   };
   if (entry.runner === 'command') Object.assign(agent, normalizeCommand(entry, where));
   else if (entry.command !== undefined || entry.promptVia !== undefined) fail(`${where}.command and promptVia are only valid for the command runner`);
@@ -153,4 +175,4 @@ function renderCommand(template, values) {
   }));
 }
 
-module.exports = { DEFAULTS, PLACEHOLDERS, RESERVED_TOKENS, RUNNERS, TOKEN_PATTERN, normalizeRoster, renderCommand, resolveFrom };
+module.exports = { DEFAULTS, EFFORT_ORDER, PLACEHOLDERS, RESERVED_TOKENS, RUNNERS, TOKEN_PATTERN, normalizeRoster, renderCommand, resolveFrom };

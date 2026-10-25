@@ -51,6 +51,13 @@ export interface DataAdapter {
   setDoc(collection: string, id: string, data: Record<string, unknown>, options?: { merge?: boolean }): Promise<void>
   updateDoc(collection: string, id: string, patch: Record<string, unknown>): Promise<void>
   deleteDoc(collection: string, id: string): Promise<void>
+  /**
+   * Read one document and write the patch `decide` returns; `decide` throws to
+   * abort. Firestore runs this in a transaction. The local adapter reads then
+   * writes, which is enough for its single-user server (an agent CLI writing
+   * the same item in between is the only race).
+   */
+  transactDocument(collection: string, id: string, decide: (current: Record<string, unknown> | undefined) => Record<string, unknown>): Promise<void>
   createWorkItem(item: NewWorkItem): Promise<number>
   uploadAttachments(files: File[], kind: string, itemId: string, uploaderEmail: string): Promise<UploadedAttachments>
 }

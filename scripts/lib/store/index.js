@@ -19,7 +19,7 @@
 //                              next number atomically; -> { id, number }
 //   items.get(id)              -> document | null (with `messages`)
 //   items.getMany(ids)         -> [{ id, ...document }] (missing ids omitted)
-//   items.list({ kind, waitingOn, limit })
+//   items.list({ kind, waitingOn, limit })   limit: null reads every match
 //                              -> [{ id, ...document }]; the queue query
 //   items.update(id, patch, { messages })
 //                              top-level field replace + append messages;

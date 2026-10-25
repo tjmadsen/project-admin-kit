@@ -235,11 +235,11 @@ function createGitHubStore({
     const labels = [kind && `${labelPrefix}kind:${kind}`, waitingOn && `${labelPrefix}waiting:${waitingOn}`].filter(Boolean);
     const state = waitingOn && waitingOn !== 'done' ? 'open' : 'all';
     const query = `${repo}/issues?state=${state}${labels.length ? `&labels=${encodeURIComponent(labels.join(','))}` : ''}`;
-    const issues = await transport.paginate(query, { max: limit * 2 });
+    const issues = await transport.paginate(query, { max: limit == null ? Infinity : limit * 2 });
     return issues.map((issue) => decodeIssue(issue, decodeOptions)).filter(Boolean)
       .map(({ item }) => ({ id: String(item.number), ...item }))
       .filter((item) => (!kind || item.kind === kind) && (!waitingOn || item.waitingOn === waitingOn))
-      .slice(0, limit);
+      .slice(0, limit ?? undefined);
   }
 
   const unsupported = (what) => async () => {

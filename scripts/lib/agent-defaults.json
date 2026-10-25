@@ -7,33 +7,44 @@
       "effortEnv": "CODEX_EFFORT",
       "defaultSandbox": "danger-full-access",
       "sandboxes": ["read-only", "workspace-write", "danger-full-access"],
-      "usage": { "provider": "codex", "script": "scripts/agent-loops/capture-codex-usage.sh" }
+      "usage": {
+        "provider": "codex",
+        "script": "scripts/agent-loops/capture-codex-usage.sh"
+      },
+      "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"]
     },
     "claude": {
       "label": "Claude",
       "guarded": true,
       "modelEnv": "CLAUDE_MODEL",
       "effortEnv": "CLAUDE_EFFORT",
-      "usage": { "provider": "claude", "script": "scripts/agent-loops/capture-claude-usage.sh" }
+      "observesModel": true,
+      "usage": {
+        "provider": "claude",
+        "script": "scripts/agent-loops/capture-claude-usage.sh"
+      },
+      "efforts": ["low", "medium", "high", "xhigh", "max"]
     },
     "grok": {
       "label": "Grok",
       "guarded": false,
-      "effortEnv": "GROK_EFFORT"
+      "effortEnv": "GROK_EFFORT",
+      "efforts": ["low", "medium", "high", "xhigh"]
     },
     "command": {
       "label": "Command",
-      "guarded": false
+      "guarded": false,
+      "efforts": ["low", "medium", "high"]
     }
   },
   "agents": [
     { "token": "sol", "label": "Codex Sol", "short": "Sol", "emoji": "☀️", "runner": "codex", "model": "gpt-5.6-sol" },
     { "token": "terra", "label": "Codex Terra", "short": "Terra", "emoji": "🌍", "runner": "codex", "model": "gpt-5.6-terra" },
-    { "token": "luna", "label": "Codex Luna", "short": "Luna", "emoji": "🌙", "runner": "codex", "model": "gpt-5.6-luna" },
+    { "token": "luna", "label": "Codex Luna", "short": "Luna", "emoji": "🌙", "runner": "codex", "model": "gpt-5.6-luna", "efforts": ["low", "medium", "high", "xhigh", "max"] },
     { "token": "opus", "label": "Claude Opus", "short": "Opus", "emoji": "◆", "runner": "claude", "model": "opus", "claimsUnassigned": true },
     { "token": "sonnet", "label": "Claude Sonnet", "short": "Sonnet", "emoji": "⚡", "runner": "claude", "model": "sonnet" },
     { "token": "fable", "label": "Claude Fable", "short": "Fable", "emoji": "◇", "runner": "claude", "model": "fable" },
     { "token": "grok", "label": "Grok", "short": "Grok", "emoji": "✕", "runner": "grok", "model": "grok", "pollSeconds": 1800 }
   ],
-  "agentAliases": { "codex": "terra", "claude": "sonnet" }
+  "agentAliases": {"codex":  "terra", "claude":  "sonnet"}
 }

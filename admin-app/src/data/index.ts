@@ -66,6 +66,8 @@ export const updateDocument = (collection: string, id: string, patch: Record<str
   loadAdapter().then((adapter) => adapter.updateDoc(collection, id, patch))
 export const deleteDocument = (collection: string, id: string) =>
   loadAdapter().then((adapter) => adapter.deleteDoc(collection, id))
+export const transactDocument = (collection: string, id: string, decide: (current: Record<string, unknown> | undefined) => Record<string, unknown>) =>
+  loadAdapter().then((adapter) => adapter.transactDocument(collection, id, decide))
 export const createWorkItem = (item: NewWorkItem) => loadAdapter().then((adapter) => adapter.createWorkItem(item))
 export const uploadAttachments = (files: File[], kind: string, itemId: string, uploaderEmail: string): Promise<UploadedAttachments> => {
   if (files.length === 0) return Promise.resolve({ urls: [], cleanup: async () => undefined })

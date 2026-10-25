@@ -130,3 +130,14 @@ test('the shell helper prints eval-safe fields and canonicalizes aliases', () =>
   assert.equal(spawnSync(process.execPath, [helper, 'resolve', 'gemini']).status, 1);
   assert.equal(shellFields(AGENTS.grok).PA_USAGE_SCRIPT, '');
 });
+
+test('advertises each CLI\'s own effort range instead of one list for every model', () => {
+  assert.deepEqual(resolveAgent('sol').efforts, ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
+  assert.deepEqual(resolveAgent('terra').efforts, ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
+  // Luna's gpt-5.6 build has no "ultra" tier in `codex debug models`, unlike sol and terra.
+  assert.deepEqual(resolveAgent('luna').efforts, ['low', 'medium', 'high', 'xhigh', 'max']);
+  assert.deepEqual(resolveAgent('opus').efforts, ['low', 'medium', 'high', 'xhigh', 'max']);
+  assert.deepEqual(resolveAgent('sonnet').efforts, ['low', 'medium', 'high', 'xhigh', 'max']);
+  assert.deepEqual(resolveAgent('fable').efforts, ['low', 'medium', 'high', 'xhigh', 'max']);
+  assert.deepEqual(resolveAgent('grok').efforts, ['low', 'medium', 'high', 'xhigh']);
+});

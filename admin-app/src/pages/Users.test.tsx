@@ -63,4 +63,30 @@ describe('Users access management', () => {
       expect.objectContaining({ role: 'admin' }),
     ))
   })
+
+  it('shows resolved notification defaults and writes the full map when a toggle changes', async () => {
+    mocks.users[0] = { ...mocks.users[0], notifications: { email: { final_outcome: false } } }
+    render(<Users currentEmail="owner@example.com" />)
+
+    expect(screen.queryByLabelText('Email Needs your action for owner@example.com')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Notifications for owner@example.com' }))
+
+    expect(screen.getByLabelText('Email Needs your action for owner@example.com')).toBeChecked()
+    expect(screen.getByLabelText('Email Deploy progress for owner@example.com')).not.toBeChecked()
+    expect(screen.getByLabelText('Email Completed for owner@example.com')).not.toBeChecked()
+    expect(screen.getByLabelText('Push Deploy progress for owner@example.com')).toBeChecked()
+    expect(screen.getByText('Email 1/4 · Push 4/4')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByLabelText('Email Needs your action for owner@example.com'))
+    await waitFor(() => expect(mocks.updateDoc).toHaveBeenCalledWith(
+      'adminUsers/owner@example.com',
+      expect.objectContaining({
+        notifications: {
+          email: { action_required: false, deployment_failure: false, deployment_progress: false, final_outcome: false },
+          push: { action_required: true, deployment_failure: true, deployment_progress: true, final_outcome: true },
+        },
+      }),
+    ))
+  })
+
 })

@@ -8,6 +8,9 @@ set -euo pipefail
 
 HELPER="$(cd "$(dirname "$0")/../../lib" && pwd)/agents.js"
 mode="${1:-run}"
+# A generic CLI launches exactly the configured model and reports nothing more.
+if [[ "$mode" == "resolve" ]]; then printf '%s\t%s\n' "$PA_MODEL" "$PA_EFFORT"; exit 0; fi
+[[ "$mode" == "observe-model" ]] && exit 0
 render=(render-command)
 [[ "$mode" == "check" ]] && render+=(--check)
 argv=()

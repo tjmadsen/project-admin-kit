@@ -14,6 +14,12 @@ if [[ "${1:-}" == "check" ]]; then
   echo "$grok_bin"
   exit 0
 fi
+# Grok runs its CLI default; record which model that is.
+if [[ "${1:-}" == "resolve" ]]; then
+  printf '%s\t%s\n' "$(node "$(dirname "$0")/../resolve-model.js" grok "$grok_bin" || true)" "$PA_EFFORT"
+  exit 0
+fi
+[[ "${1:-}" == "observe-model" ]] && exit 0
 
 # The Grok CLI picks its own model, so PA_MODEL is informational here. It has no
 # PreToolUse hook, so headless-guard.py cannot run.

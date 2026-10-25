@@ -14,6 +14,8 @@ export interface AgentConfigEntry {
   usage?: false | { provider: string; script: string }
   command?: string[]
   promptVia?: 'arg' | 'stdin'
+  efforts?: string[]
+  pinModel?: boolean
 }
 
 // One entry of project-admin.config.json#workKinds. Every field is optional

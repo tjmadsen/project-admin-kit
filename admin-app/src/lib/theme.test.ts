@@ -27,6 +27,16 @@ beforeEach(() => {
 })
 
 describe('theme preference', () => {
+  it('keeps a saved explicit appearance when the OS preference differs on reload', () => {
+    window.localStorage.setItem(THEME_STORAGE_KEY, 'light')
+    mockMatchMedia(true)
+
+    const stop = initTheme()
+    expect(html()).toBe('light')
+    expect(readTheme()).toBe('light')
+    stop()
+  })
+
   it('defaults to system when nothing valid is stored', () => {
     expect(readTheme()).toBe('system')
     window.localStorage.setItem(THEME_STORAGE_KEY, 'sepia')

@@ -45,6 +45,7 @@ function isLeaseOpen(data) {
   const millis = data.leaseExpiresAt?.toMillis?.() ?? 0;
   return !data.claimedBy || millis <= Date.now();
 }
+function isDeferred(data) { return (data.deferredUntil?.toMillis?.() ?? 0) > Date.now(); }
 function ownedBy(agent, data) { return data.assignedTo === agent.owner || (agent.claimsUnassigned && !data.assignedTo); }
 function sortItems(a, b) {
   return (PRIORITY[a.priority] ?? 2) - (PRIORITY[b.priority] ?? 2)
@@ -192,11 +193,14 @@ function createBacklogAgent({
   async function candidatesFor(agent, deploy) {
     const waitingOn = deploy ? 'deployer' : 'agent';
     const queueKinds = new Map(kindsInQueue(deploy).map((kind) => [kind.id, kind]));
-    const rows = await store.items.list({ waitingOn, kind: queueKinds.size === 1 ? [...queueKinds.keys()][0] : null, limit: 250 });
+    // Deferred items must not hide ready work beyond an arbitrary query cutoff,
+    // so the build queue reads every waiting item.
+    const rows = await store.items.list({ waitingOn, kind: queueKinds.size === 1 ? [...queueKinds.keys()][0] : null, limit: deploy ? 250 : null });
     const candidates = rows
       .filter((data) => queueKinds.get(data.kind)?.activeStatuses.includes(data.status))
       .filter((data) => deploy || ownedBy(agent, data))
       .filter((data) => !deploy || data.deploymentApprovedAt)
+      .filter((data) => deploy || !isDeferred(data))
       .filter(machineEligible).filter(isLeaseOpen);
     const itemsById = await dependencyIndexFor(candidates);
     return filterDependencyEligibleCandidates(candidates, itemsById, kinds).sort(sortItems);
@@ -213,6 +217,7 @@ function createBacklogAgent({
         if (!data) return null;
         const kind = requireKind(kinds, data.kind);
         if (data.waitingOn !== waitingOn || !kind.activeStatuses.includes(data.status) || !isLeaseOpen(data)) return null;
+        if (!deploy && isDeferred(data)) return null;
         if (deploy && (!kind.deploys || !data.deploymentApprovedAt)) return null;
         if (!deploy && (!ownedBy(agent, data) || !machineEligible(data))) return null;
         if (!await dependenciesSatisfiedInTransaction(tx, data)) return null;

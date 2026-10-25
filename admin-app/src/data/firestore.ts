@@ -57,6 +57,11 @@ export function createFirestoreAdapter(): DataAdapter {
     setDoc: (name, id, data, options = {}) => setDoc(doc(db, name, id), toFirestore(data), { merge: Boolean(options.merge) }),
     updateDoc: (name, id, patch) => updateDoc(doc(db, name, id), toFirestore(patch)),
     deleteDoc: (name, id) => deleteDoc(doc(db, name, id)),
+    transactDocument: (name, id, decide) => runTransaction(db, async (transaction) => {
+      const ref = doc(db, name, id)
+      const snapshot = await transaction.get(ref)
+      transaction.update(ref, toFirestore(decide(snapshot.exists() ? snapshot.data() : undefined)))
+    }),
     async createWorkItem({ id, counterField, data }) {
       const itemDoc = doc(db, 'workItems', id)
       return runTransaction(db, async (transaction) => {

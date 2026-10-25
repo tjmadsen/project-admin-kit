@@ -19,7 +19,7 @@ page. Do not mark a runner guarded unless its CLI really runs the hook.
 
 ## Contract
 
-Two invocations:
+Two required invocations and two optional ones:
 
 - `<adapter> check` locates the CLI (with the same fallbacks the run uses),
   prints its path, and exits 0; or prints a reason on stderr and exits non-zero.
@@ -28,6 +28,18 @@ Two invocations:
   `PA_CHECK_DEEP=1` to request a slower readiness probe (Grok runs `--version`).
 - `<adapter>` with no argument runs one iteration and must `exec` the CLI, so
   the outer `timeout` signals the CLI directly and its exit code is the run's.
+- `<adapter> resolve` prints `<model>\t<effort>`: the exact model and effort
+  to launch. Loops run the newest model in a tier rather than a pinned
+  version, so Codex picks the highest-versioned listed `gpt-<version>-<tier>`
+  slug (`resolve-model.js`) and clamps the effort to that model's menu, and
+  Grok reports its CLI default. An empty model means the CLI only reveals it
+  after launch; `PA_MODEL_PINNED=1` (an env override or `pinModel`) means
+  launch `PA_MODEL` as is. No output keeps the configured values.
+- `<adapter> observe-model` prints the model a running or finished session
+  actually used, or nothing yet. `run-loop.sh` polls it every 15 seconds,
+  only for runners with `observesModel` in `scripts/lib/agent-defaults.json`
+  (Claude, which reads the transcript for `PA_SESSION_ID`), until it answers.
+  Either way the run record ends up with the exact model ID.
 
 `run-loop.sh` owns everything around the CLI: the outer `timeout --signal=TERM
 --kill-after=30s` wall, stdin (always `/dev/null`, never launchd's inherited
@@ -38,9 +50,9 @@ Environment passed to every adapter:
 
 | Variable | Meaning |
 |---|---|
-| `PA_AGENT`, `PA_QUEUE`, `PA_RUNNER` | canonical agent token, `feature`/`bug`/`deploy`, runner name |
-| `PA_MODEL` | configured `model`, after the runner's env override (`CODEX_MODEL`, `CLAUDE_MODEL`) |
-| `PA_EFFORT` | item thinking effort, after the runner's env override (`CODEX_EFFORT`, `CLAUDE_EFFORT`, `GROK_EFFORT`); this is also what the run record shows |
+| `PA_AGENT`, `PA_QUEUE`, `PA_RUNNER` | canonical agent token, queue (a work kind or `deploy`), runner name |
+| `PA_MODEL` | the model to launch: `resolve`'s answer, else the configured `model` after the runner's env override (`CODEX_MODEL`, `CLAUDE_MODEL`) |
+| `PA_EFFORT` | item thinking effort, after the runner's env override (`CODEX_EFFORT`, `CLAUDE_EFFORT`, `GROK_EFFORT`) and `resolve`'s clamp; this is also what the run record shows |
 | `PA_PROMPT_FILE` | the rendered prompt (`{{AGENT}}` substituted) under `.agent-logs/`; removed after the run |
 | `PA_REPO_ROOT` | the loop checkout of the product repository to work in (`PRODUCT_ROOT`, docs/LAYOUTS.md) |
 | `PA_SANDBOX` | Codex `--sandbox` mode (empty for other runners) |
@@ -48,6 +60,7 @@ Environment passed to every adapter:
 | `PA_BG_WAIT_CEILING_MS` | Claude print-mode background-wait ceiling for this queue |
 | `PA_TIMEOUT_SECONDS` | the outer wall, for CLIs that accept their own budget |
 | `PA_COMMAND_JSON`, `PA_PROMPT_VIA` | `command` runner template and prompt delivery |
+| `PA_SESSION_ID` | a fresh UUID per run; Claude passes it as `--session-id` so `observe-model` can find the transcript |
 
 A CLI that reads its prompt from stdin must redirect it from `PA_PROMPT_FILE`
 inside the adapter (`exec cli ... - <"$PA_PROMPT_FILE"`); one that takes it as

@@ -144,6 +144,21 @@ notify_auth_failure() {
     --message "Headless agent loops on $MACHINE_ID cannot authenticate ($AGENT_TOKEN x $QUEUE_NAME). Run: claude setup-token (or codex login). Loops are idle until fixed." >&2 || true
 }
 
+# Claude writes the model its alias resolved to into the session transcript
+# once the first reply arrives; copy it onto the run record. Sets the
+# caller's run_model so the lookup stops after the first hit.
+# Some CLIs only reveal the exact model after launch (Claude writes the model
+# its alias resolved to into the session transcript once the first reply
+# arrives). Ask the adapter and copy it onto the run record. Sets the caller's
+# run_model so the lookup stops after the first hit.
+record_observed_model() {
+  local found
+  found="$(PA_SESSION_ID="$run_session" "$RUNNER_ADAPTER" observe-model 2>/dev/null || true)"
+  [[ -n "$found" ]] || return 0
+  run_model="$found"
+  node "$SCRIPT_DIR/log-run.js" model --run "$1" --model "$found" >/dev/null 2>&1 || true
+}
+
 run_once() {
   cd "$PRODUCT_ROOT"
   # A run killed by a signal (launchctl bootout during provision-machine.sh
@@ -152,7 +167,7 @@ run_once() {
   # claimed until the four-hour lease lapses. Sweep this machine's abandoned
   # runs before counting work so their items are claimable on this very fire.
   node "$SCRIPT_DIR/log-run.js" reap --machine "$MACHINE_ID" >/dev/null 2>&1 || true
-  local count_json work_count item_effort run_effort run_model prompt_template prompt_file loop_run_id log_dir log_file exit_code summary classified release_reason confirmation_requested confirmation_handoff handoff_status
+  local count_json work_count item_effort run_effort run_model launch_model run_session resolved model_pinned prompt_template prompt_file loop_run_id log_dir log_file exit_code summary classified release_reason confirmation_requested confirmation_handoff handoff_status
   count_json="$(count_queue)"
   work_count="$(node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).count))' <<<"$count_json")"
   item_effort="$(node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).topThinkingEffort||"medium"))' <<<"$count_json")"
@@ -169,16 +184,35 @@ run_once() {
   # Fail before a run row exists when the CLI is not installed, as before.
   PA_COMMAND_JSON="$PA_COMMAND_JSON" "$RUNNER_ADAPTER" check >/dev/null || return 1
   # The runner's documented env overrides (CODEX_MODEL, CLAUDE_EFFORT, ...) win
-  # over the configured model and the item's effort; resolving them here keeps
-  # the recorded effort equal to the one the CLI actually gets.
+  # over the configured model and the item's effort, and an overridden or
+  # `pinModel` agent keeps exactly that model.
   run_model="$PA_MODEL"
   run_effort="$item_effort"
-  if [[ -n "$PA_MODEL_ENV" ]]; then run_model="${!PA_MODEL_ENV:-$PA_MODEL}"; fi
+  model_pinned="$PA_PIN_MODEL"
+  if [[ -n "$PA_MODEL_ENV" && -n "${!PA_MODEL_ENV:-}" ]]; then run_model="${!PA_MODEL_ENV}"; model_pinned=1; fi
   if [[ -n "$PA_EFFORT_ENV" ]]; then run_effort="${!PA_EFFORT_ENV:-$item_effort}"; fi
+  # Loops run each tier's newest model rather than a pinned version, and every
+  # run records the exact model it used. The adapter's `resolve` prints
+  # "<model>\t<effort>": Codex picks the tier's newest listed slug and clamps
+  # the effort to its menu, Grok reports its CLI default, and an empty model
+  # means the CLI only reveals it after launch (see record_observed_model).
+  resolved="$(PA_AGENT="$AGENT_TOKEN" PA_MODEL="$run_model" PA_EFFORT="$run_effort" PA_MODEL_PINNED="$model_pinned" PA_COMMAND_JSON="$PA_COMMAND_JSON" "$RUNNER_ADAPTER" resolve 2>/dev/null || true)"
+  # launch_model is what the CLI is told to run; run_model is what the run
+  # records, which stays empty until an observing adapter reports it.
+  launch_model="$run_model"
+  if [[ "$resolved" == *$'\t'* ]]; then
+    # Split by hand: `read` with a tab IFS would swallow an empty model field.
+    run_model="${resolved%%$'\t'*}"
+    run_effort="${resolved#*$'\t'}"
+    [[ -n "$run_effort" ]] || run_effort="$item_effort"
+    [[ -n "$run_model" ]] && launch_model="$run_model"
+  fi
+  # A fixed session ID lets an adapter find this run's transcript afterwards.
+  run_session="$(node -e 'console.log(require("crypto").randomUUID())')"
 
   # `$$` is this run-loop.sh process even inside the command substitution, and
   # it is the pid the reaper checks to tell a killed run from a sleeping Mac.
-  loop_run_id="$(node "$SCRIPT_DIR/log-run.js" start --agent "$AGENT_TOKEN" --queue "$QUEUE_NAME" --machine "$MACHINE_ID" --pid $$ --effort "$run_effort")"
+  loop_run_id="$(node "$SCRIPT_DIR/log-run.js" start --agent "$AGENT_TOKEN" --queue "$QUEUE_NAME" --machine "$MACHINE_ID" --pid $$ --effort "$run_effort" --model "$run_model")"
   export PROJECT_ADMIN_AGENT_RUN_ID="$loop_run_id"
   export PROJECT_ADMIN_MACHINE_ID="$MACHINE_ID"
   # The runbooks' first step, `eval "$(node "$PROJECT_ADMIN_KIT_ROOT/scripts/project-env.js" shell)"`,
@@ -195,21 +229,26 @@ run_once() {
   # runner gets the same wall and kill escalation.
   local -a command_line=("$TIMEOUT_BIN" --signal=TERM --kill-after=30s "$LOOP_TIMEOUT_SECONDS" env
     "PA_AGENT=$AGENT_TOKEN" "PA_QUEUE=$QUEUE_NAME" "PA_RUNNER=$PA_RUNNER"
-    "PA_MODEL=$run_model" "PA_EFFORT=$run_effort" "PA_PROMPT_FILE=$prompt_file"
+    "PA_MODEL=$launch_model" "PA_EFFORT=$run_effort" "PA_PROMPT_FILE=$prompt_file"
     "PA_REPO_ROOT=$PRODUCT_ROOT" "PA_SANDBOX=$PA_SANDBOX" "PA_HEADLESS_GUARD=$SCRIPT_DIR/headless-guard.py"
     "PA_BG_WAIT_CEILING_MS=$CLAUDE_BACKGROUND_WAIT_CEILING_MS" "PA_TIMEOUT_SECONDS=$LOOP_TIMEOUT_SECONDS"
-    "PA_COMMAND_JSON=$PA_COMMAND_JSON" "PA_PROMPT_VIA=$PA_PROMPT_VIA"
+    "PA_COMMAND_JSON=$PA_COMMAND_JSON" "PA_PROMPT_VIA=$PA_PROMPT_VIA" "PA_SESSION_ID=$run_session"
     "$RUNNER_ADAPTER")
 
   set +e
   # Never leave launchd's inherited stdin open: an adapter whose CLI reads the
   # prompt from stdin redirects it from PA_PROMPT_FILE, so every CLI sees EOF.
   "${command_line[@]}" </dev/null > >(tee "$log_file") 2>&1 &
-  local worker_pid=$! heartbeat_seconds=0 progress_seconds=0 progress_summary
+  local worker_pid=$! heartbeat_seconds=0 progress_seconds=0 model_seconds=0 progress_summary
   while kill -0 "$worker_pid" 2>/dev/null; do
     sleep 5
     heartbeat_seconds=$((heartbeat_seconds + 5))
     progress_seconds=$((progress_seconds + 5))
+    model_seconds=$((model_seconds + 5))
+    if [[ "$PA_OBSERVES_MODEL" == "1" && -z "$run_model" ]] && (( model_seconds >= 15 )); then
+      record_observed_model "$loop_run_id"
+      model_seconds=0
+    fi
     if (( progress_seconds >= PROGRESS_INTERVAL_SECONDS )); then
       progress_summary="$(tail -c 4000 "$log_file" 2>/dev/null || true)"
       [[ -n "${progress_summary//[[:space:]]/}" ]] || progress_summary="Worker active; no output has been captured yet."
@@ -223,6 +262,7 @@ run_once() {
   done
   wait "$worker_pid"
   exit_code=$?
+  [[ "$PA_OBSERVES_MODEL" == "1" && -z "$run_model" ]] && record_observed_model "$loop_run_id"
   set -e
   rm -f "$prompt_file"
   summary="$(tail -c 6000 "$log_file" 2>/dev/null || true)"

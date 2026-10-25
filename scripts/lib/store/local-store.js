@@ -112,7 +112,7 @@ function createLocalStore({ file, now = () => StoreTimestamp.now(), readAttachme
       async list({ kind = null, waitingOn = null, limit = 300 } = {}) {
         return docs.list(WORK_ITEMS_COLLECTION)
           .filter((item) => (!kind || item.kind === kind) && (!waitingOn || item.waitingOn === waitingOn))
-          .slice(0, limit);
+          .slice(0, limit ?? undefined);
       },
       async update(id, patch, { messages = [] } = {}) { await docs.update(WORK_ITEMS_COLLECTION, id, withMessages(patch, messages)); },
       transact,

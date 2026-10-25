@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AGENT_FAMILIES, AGENT_MODELS, DEFAULT_WORK_AGENT, agentByOwner, agentByToken, buildAgentModels, familyForAgent } from './agents'
+import { AGENT_FAMILIES, AGENT_MODELS, ALL_THINKING_EFFORTS, DEFAULT_WORK_AGENT, agentByOwner, agentByToken, buildAgentModels, familyForAgent, thinkingEffortsFor } from './agents'
 import agentDefaults from '../../../scripts/lib/agent-defaults.json'
 
 describe('agent model registry', () => {
@@ -34,5 +34,31 @@ describe('agent model registry', () => {
   it('derives a custom command-runner agent from config alone', () => {
     const [gemini] = buildAgentModels({ agents: [{ token: 'gemini', label: 'Gemini Pro', runner: 'command', model: 'gemini-2.5-pro', command: ['gemini', '-p', '{{prompt}}'] }] })
     expect(gemini).toMatchObject({ owner: 'gemini-agent', family: 'command', short: 'Gemini Pro', emoji: 'G', guarded: false, usageProvider: null })
+  })
+})
+
+describe('thinkingEffortsFor', () => {
+  it('offers each CLI\'s own advertised effort range, not one list for every model', () => {
+    expect(thinkingEffortsFor('sol-agent')).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
+    expect(thinkingEffortsFor('terra-agent')).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
+    // Luna's gpt-5.6 build has no "ultra" tier in `codex debug models`, unlike sol and terra.
+    expect(thinkingEffortsFor('luna-agent')).toEqual(['low', 'medium', 'high', 'xhigh', 'max'])
+    expect(thinkingEffortsFor('opus-agent')).toEqual(['low', 'medium', 'high', 'xhigh', 'max'])
+    expect(thinkingEffortsFor('sonnet-agent')).toEqual(['low', 'medium', 'high', 'xhigh', 'max'])
+    expect(thinkingEffortsFor('fable-agent')).toEqual(['low', 'medium', 'high', 'xhigh', 'max'])
+    expect(thinkingEffortsFor('grok-agent')).toEqual(['low', 'medium', 'high', 'xhigh'])
+  })
+
+  it('falls back to the full canonical range for an unassigned or unrecognized owner', () => {
+    expect(thinkingEffortsFor(null)).toEqual(ALL_THINKING_EFFORTS)
+    expect(thinkingEffortsFor('')).toEqual(ALL_THINKING_EFFORTS)
+    expect(thinkingEffortsFor('retired-agent')).toEqual(ALL_THINKING_EFFORTS)
+  })
+
+  it('keeps a stored value visible even after it falls outside the assigned model\'s menu', () => {
+    // e.g. an item set to "ultra" on Sol, then reassigned to Grok, which has no "ultra" tier.
+    expect(thinkingEffortsFor('grok-agent', 'ultra')).toEqual(['ultra', 'low', 'medium', 'high', 'xhigh'])
+    // A value already on the menu is never duplicated.
+    expect(thinkingEffortsFor('grok-agent', 'high')).toEqual(['low', 'medium', 'high', 'xhigh'])
   })
 })

@@ -39,6 +39,8 @@ function shellFields(agent) {
     PA_COMMAND_JSON: agent.command ? JSON.stringify(agent.command) : '',
     PA_PROMPT_VIA: agent.promptVia || '',
     PA_POLL_SECONDS: String(agent.pollSeconds),
+    PA_PIN_MODEL: agent.pinModel ? '1' : '0',
+    PA_OBSERVES_MODEL: runner.observesModel ? '1' : '0',
   };
 }
 

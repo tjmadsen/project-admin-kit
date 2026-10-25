@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
 import EmptyState from '../components/EmptyState'
 import ActiveAgentBadge from '../components/ActiveAgentBadge'
 import { useRegisterDetailBack } from '../components/DetailBackContext'
@@ -9,11 +9,11 @@ import PageHeader from '../components/PageHeader'
 import WorkItemDependencies, { blockingDependencies, dependencyWaitLabel } from '../components/WorkItemDependencies'
 import { useCollection } from '../hooks/useCollection'
 import { useLoopRuns } from '../hooks/useLoopData'
-import { AGENT_MODELS, DEFAULT_WORK_AGENT, agentByOwner, agentByToken } from '../lib/agents'
+import { AGENT_MODELS, DEFAULT_WORK_AGENT, agentByOwner, agentByToken, thinkingEffortsFor } from '../lib/agents'
 import { attachmentFilesFromDataTransfer, mergeAttachmentFiles, uploadWorkAttachments, type UploadedAttachments } from '../lib/attachments'
 import { deploymentTargetsFor, legacyDeploymentType, normalizeDeploymentTargets, pickerDeploymentTargets } from '../lib/deployment'
-import { arrayUnion, createWorkItem, newDocumentId, nowTimestamp, serverTimestamp, updateDocument } from '../data'
-import { deploymentLabel, formatRelative, gateLabel, itemRef, matchesItemReference, ownerLabel, toDate, waitingLabel } from '../lib/format'
+import { arrayUnion, createWorkItem, newDocumentId, nowTimestamp, serverTimestamp, transactDocument, updateDocument } from '../data'
+import { adminWorkItemPath, deploymentLabel, formatRelative, gateLabel, itemRef, matchesItemReference, ownerLabel, toDate, waitingLabel } from '../lib/format'
 import { readPreference, writePreference } from '../lib/preferences'
 import { preferencePrefix, projectConfig } from '../lib/project-config'
 import type { Owner, Priority, ReviewGate, ThinkingEffort, WorkItem, WorkKind, WorkMessage } from '../lib/types'
@@ -55,6 +55,10 @@ export function syncPhoneDetailHeight(appShell: HTMLElement, thread: HTMLElement
     const wasNearBottom = Boolean(thread && threadNearBottom(thread))
     const viewportHeight = Math.round(visualViewport?.height || targetWindow.innerHeight)
     if (viewportHeight > 0) appShell.style.setProperty('--app-height', `${viewportHeight}px`)
+    // iOS scrolls the page to reveal the focused note box when the keyboard
+    // opens. html/body never scroll, so the offset would strand the shell above
+    // the viewport (blank screen) and outlive the keyboard as a bottom gap.
+    if (targetWindow.scrollY > 0 || (visualViewport?.offsetTop || 0) > 0) targetWindow.scrollTo(0, 0)
     if (thread) {
       thread.scrollTop = wasNearBottom
         ? Math.max(0, thread.scrollHeight - thread.clientHeight)
@@ -74,6 +78,7 @@ export function syncPhoneDetailHeight(appShell: HTMLElement, thread: HTMLElement
 
   visualViewport?.addEventListener('resize', schedule)
   visualViewport?.addEventListener('scroll', schedule)
+  targetWindow.addEventListener('scroll', schedule)
   targetWindow.addEventListener('resize', schedule)
   targetWindow.addEventListener('orientationchange', schedule)
   listenToMedia()
@@ -83,12 +88,22 @@ export function syncPhoneDetailHeight(appShell: HTMLElement, thread: HTMLElement
     if (frame !== null) targetWindow.cancelAnimationFrame(frame)
     visualViewport?.removeEventListener('resize', schedule)
     visualViewport?.removeEventListener('scroll', schedule)
+    targetWindow.removeEventListener('scroll', schedule)
     targetWindow.removeEventListener('resize', schedule)
     targetWindow.removeEventListener('orientationchange', schedule)
     stopListeningToMedia()
     if (previousHeight) appShell.style.setProperty('--app-height', previousHeight)
     else appShell.style.removeProperty('--app-height')
   }
+}
+
+// The phone note box starts at one line and grows with its text until the CSS
+// max-height, then scrolls inside the box.
+export function fitNoteToText(textarea: HTMLTextAreaElement) {
+  textarea.style.height = 'auto'
+  const style = getComputedStyle(textarea)
+  const borders = (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.borderBottomWidth) || 0)
+  textarea.style.height = `${textarea.scrollHeight + borders}px`
 }
 
 function usePhoneDetailLayout() {
@@ -166,6 +181,25 @@ export function stripMarkdown(value: string) {
 
 export function messageRole(author: string): 'agent' | 'human' {
   return /^(Codex|Claude|Grok)\b/i.test(author.trim()) ? 'agent' : 'human'
+}
+
+function questionChoices(item: WorkItem) {
+  const latestAgent = (item.messages || []).filter((entry) => messageRole(entry.author) === 'agent').at(-1)
+  if (!latestAgent) return []
+  // Choices may be inline or a Markdown list. Ignore examples in code and the
+  // handoff instruction, and require a complete, unambiguous A/B/... sequence.
+  const body = latestAgent.body
+    .replace(/(```|~~~)[\s\S]*?\1/g, '')
+    .replace(/\*\*|__/g, '')
+    .split(/(?:^|\s)Next:\s*/i)[0]
+  const matchingBody = body.replace(/`[^`\n]*`/g, (code) => 'x'.repeat(code.length))
+  const markers = [...matchingBody.matchAll(/(?:^|\s)(?:[-*]\s+)?([A-Z])[).:]\s+/g)]
+  if (markers.length < 2 || markers.some((marker, index) => marker[1] !== String.fromCharCode(65 + index))) return []
+  const choices = markers.map((marker, index) => ({
+    letter: marker[1],
+    label: stripMarkdown(body.slice(marker.index! + marker[0].length, markers[index + 1]?.index ?? body.length)),
+  }))
+  return choices.every((choice) => choice.label) ? choices : []
 }
 
 export function deploymentSummary(item: Pick<WorkItem, 'deploymentTargets' | 'deploymentType' | 'deploymentApprovedTargets'>, approved = false) {
@@ -253,6 +287,32 @@ export function parseSeenCounts(value: string): Record<string, number> {
 function timestampValue(value: unknown) { return toDate(value)?.getTime() ?? 0 }
 function isLeaseOpen(item: WorkItem) { return !item.claimedBy || timestampValue(item.leaseExpiresAt) <= Date.now() }
 
+function localDateTime(value: unknown) {
+  const date = toDate(value)
+  if (!date) return ''
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
+}
+
+function deferredUntilTimestamp(value: string) {
+  if (!value) return null
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime()) || localDateTime(date) !== value) throw new Error('Choose a valid local date and time.')
+  return nowTimestamp(date.getTime())
+}
+
+// Refresh eligibility at the next deadline even if Firestore has no new snapshot.
+function useDeferredClock(items: WorkItem[]) {
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    const current = Date.now()
+    const deadlines = items.filter((item) => item.waitingOn === 'agent').map((item) => timestampValue(item.deferredUntil)).filter((deadline) => deadline > current)
+    if (!deadlines.length) return
+    const timer = window.setTimeout(() => setTick((value) => value + 1), Math.min(Math.min(...deadlines) - current + 1, 2_147_483_647))
+    return () => window.clearTimeout(timer)
+  }, [items, tick])
+  return Date.now()
+}
+
 function sortWorkItems(items: WorkItem[], sortKey: SortKey, direction: 'asc' | 'desc') {
   const sign = direction === 'asc' ? 1 : -1
   return [...items].sort((a, b) => {
@@ -287,6 +347,7 @@ export default function WorkItems({ kind, canManage, actorEmail, actorName = can
   const allItems = workItems.data
   const data = useMemo(() => allItems.filter((item) => item.kind === kind), [allItems, kind])
   const definition = workKindOrFallback(kind)
+  const now = useDeferredClock(data)
   const { runs } = useLoopRuns(150)
   const { loading, error } = workItems
   const initialSort = initialSortPreference(kind)
@@ -314,15 +375,15 @@ export default function WorkItems({ kind, canManage, actorEmail, actorName = can
     return matchesText && matchesFilter(item, filter) && (ownerFilter === 'all' || item.assignedTo === ownerFilter)
   }), sortKey, sortDirection), [data, filter, kind, ownerFilter, queryText, sortDirection, sortKey])
   const selected = data.find((item) => item.id === selectedId) ?? null
-  const filterValues = ['human', 'agent', 'deployer', 'all']
+  const filterValues = ['human', 'agent', 'deployer', 'hold', 'all']
   const filterCounts = useMemo(() => Object.fromEntries(filterValues.map((value) => [value, data.filter((item) => matchesFilter(item, value)).length])), [data, kind])
   const upNext = useMemo(() => {
-    const eligible = sortWorkItems(data.filter((item) => item.waitingOn === 'agent' && !isTerminalStatus(item) && isLeaseOpen(item) && blockingDependencies(item, allItems).length === 0), 'priority', 'asc')
+    const eligible = sortWorkItems(data.filter((item) => item.waitingOn === 'agent' && timestampValue(item.deferredUntil) <= now && !isTerminalStatus(item) && isLeaseOpen(item) && blockingDependencies(item, allItems).length === 0), 'priority', 'asc')
     return AGENT_MODELS.map((agent) => ({
       agent,
       items: eligible.filter((item) => item.assignedTo === agent.owner || (agent.claimsUnassigned && !item.assignedTo)).slice(0, 3),
     })).filter((lane) => lane.items.length > 0)
-  }, [allItems, data, kind])
+  }, [allItems, data, kind, now])
 
   const openItem = useCallback((item: WorkItem) => {
     const messageCount = item.messages?.length || 0
@@ -365,7 +426,7 @@ export default function WorkItems({ kind, canManage, actorEmail, actorName = can
     if (!isDesktopWorkList()) savedListScrollTop.current = listScrollRef.current?.scrollTop ?? 0
     suppressDesktopAutoSelect.current = false
     if (item.kind !== kind) {
-      window.location.assign(`${workKindPath(workKindOrFallback(item.kind))}?item=${encodeURIComponent(itemRef(item.kind, item.number))}`)
+      window.location.assign(adminWorkItemPath(item))
       return
     }
     openItem(item)
@@ -445,6 +506,7 @@ export default function WorkItems({ kind, canManage, actorEmail, actorName = can
             <span className="work-card-top"><small>{itemRef(kind, item.number)}</small><ActiveAgentBadge itemRef={itemRef(kind, item.number)} runs={runs} /><b className={`priority-chip ${item.priority}`}>{item.priority}</b>{effectiveGate(item) && <b className={`gate-chip ${effectiveGate(item)}`}>{gateLabel(effectiveGate(item))}</b>}<time>{formatRelative(item.updatedAt)}</time></span>
             <strong>{unread > 0 && <i className="unread-dot" aria-label="Unread messages" />}{item.title}</strong><em>{lastMessagePreview(item)}</em>
             {dependencyWaitLabel(item, allItems) && <span className="dependency-wait">{dependencyWaitLabel(item, allItems)}</span>}
+            {item.waitingOn === 'agent' && timestampValue(item.deferredUntil) > now && <span className="dependency-wait">Deferred until {toDate(item.deferredUntil)?.toLocaleString()}</span>}
             <span className="work-card-meta"><span>{ownerLabel(item.assignedTo)}</span><b className={`queue-pill ${item.waitingOn}`}>{waitingLabel(item.waitingOn)}</b>{item.prNumber && item.prUrl ? <a className="pr-pill" href={item.prUrl} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>PR #{item.prNumber}</a> : item.prNumber ? <span>PR #{item.prNumber}</span> : null}{deploymentTargetsFor(item).filter((target) => target !== 'none').length > 0 && <span>{deploymentSummary(item)}</span>}<span>{groupThreadMessages(item.messages || []).length} events</span>{unread > 0 && <b className="new-message-count">+{unread} new</b>}{item.imageUrls?.length ? <span>{item.imageUrls.length} attachments</span> : null}</span>
           </div>})}
         </div>
@@ -457,11 +519,13 @@ export default function WorkItems({ kind, canManage, actorEmail, actorName = can
 }
 
 function NewItem({ kind, canManage, actorEmail, onClose, onCreated }: { kind: WorkKind; canManage: boolean; actorEmail: string; onClose: () => void; onCreated: (id: string) => void }) {
+  const defaultOwner = agentByToken(DEFAULT_WORK_AGENT)?.owner || 'sol-agent'
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [priority, setPriority] = useState<Priority>('medium')
   const [routeNow, setRouteNow] = useState(false)
-  const [owner, setOwner] = useState<Owner>(agentByToken(DEFAULT_WORK_AGENT)?.owner || 'sol-agent')
+  const [deferredUntil, setDeferredUntil] = useState('')
+  const [owner, setOwner] = useState<Owner>(defaultOwner)
   const [effort, setEffort] = useState<ThinkingEffort>('xhigh')
   const [attachments, setAttachments] = useState<File[]>([])
   const [attachmentError, setAttachmentError] = useState('')
@@ -469,6 +533,11 @@ function NewItem({ kind, canManage, actorEmail, onClose, onCreated }: { kind: Wo
   const [error, setError] = useState('')
   const definition = workKindOrFallback(kind)
   const [draftId] = useState(() => newDocumentId())
+  const hasUnsavedChanges = title !== '' || description !== '' || priority !== 'medium' || routeNow || deferredUntil !== '' || owner !== defaultOwner || effort !== 'xhigh' || attachments.length > 0
+  const requestClose = () => {
+    if (saving) return
+    if (!hasUnsavedChanges || window.confirm('Discard this draft? Your changes will be lost.')) onClose()
+  }
   const addAttachments = (incoming: File[]) => setAttachments((current) => {
     const merged = mergeAttachmentFiles(current, incoming)
     setAttachmentError(merged.error)
@@ -484,6 +553,7 @@ function NewItem({ kind, canManage, actorEmail, onClose, onCreated }: { kind: Wo
     setSaving(true); setError('')
     let uploaded: UploadedAttachments | undefined
     try {
+      const deadline = canManage ? deferredUntilTimestamp(deferredUntil) : null
       uploaded = await uploadWorkAttachments(attachments, kind, draftId, actorEmail)
       // The data layer allocates the kind's next number atomically.
       await createWorkItem({
@@ -491,6 +561,7 @@ function NewItem({ kind, canManage, actorEmail, onClose, onCreated }: { kind: Wo
           kind, title: title.trim(), description: description.trim(), imageUrls: uploaded?.urls || [], priority,
           status: definition.statuses.initial, waitingOn: canManage && routeNow ? 'agent' : 'human', blockedReason: canManage && routeNow ? null : 'triage', assignedTo: owner,
           thinkingEffort: effort, targetMachine: projectConfig.automation.defaultMachineId, deploymentType: 'none', deploymentTargets: [], messages: [],
+          ...(deadline ? { deferredUntil: deadline } : {}),
           createdByEmail: actorEmail.toLowerCase(), createdByRole: canManage ? 'admin' : 'collaborator', createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
         },
       })
@@ -502,7 +573,7 @@ function NewItem({ kind, canManage, actorEmail, onClose, onCreated }: { kind: Wo
     }
   }
 
-  return <Modal title={`New ${definition.label.toLowerCase()}`} onClose={saving ? () => undefined : onClose}>
+  return <Modal title={`New ${definition.label.toLowerCase()}`} onClose={requestClose}>
     <form className="form-stack" onSubmit={submit}>
       <label>Title<input required autoFocus value={title} onChange={(event) => setTitle(event.target.value)} /></label>
       <label>Description<textarea required rows={6} value={description} onPaste={handlePaste} onChange={(event) => setDescription(event.target.value)} placeholder="Describe the goal or problem. You can paste supported attachments here." /></label>
@@ -513,13 +584,28 @@ function NewItem({ kind, canManage, actorEmail, onClose, onCreated }: { kind: Wo
         <details className="advanced-disclosure">
           <summary>Route now <span>Optional</span></summary>
           <label className="check-field"><input type="checkbox" checked={routeNow} onChange={(event) => setRouteNow(event.target.checked)} /><span><strong>Send directly to an agent</strong><small>Otherwise this starts in your review queue.</small></span></label>
-          {routeNow && <div className="form-grid"><label>Agent model<OwnerSelect value={owner} onChange={setOwner} /></label><label>Thinking effort<select value={effort} onChange={(event) => setEffort(event.target.value as ThinkingEffort)}>{['low', 'medium', 'high', 'xhigh'].map((value) => <option key={value}>{value}</option>)}</select></label></div>}
+          {routeNow && <div className="form-grid"><label>Agent model<OwnerSelect value={owner} onChange={setOwner} /></label><label>Thinking effort<select value={effort} onChange={(event) => setEffort(event.target.value as ThinkingEffort)}>{thinkingEffortsFor(owner, effort).map((value) => <option key={value}>{value}</option>)}</select></label></div>}
+          <label>Deferred until<input type="datetime-local" value={deferredUntil} onChange={(event) => setDeferredUntil(event.target.value)} /></label>
+          <p className="muted">Uses your local time ({Intl.DateTimeFormat().resolvedOptions().timeZone}). Queued work becomes eligible on the first agent loop after this time.</p>
         </details>
       </> : <p className="creator-form-note">Your submission defaults to {agentByToken(DEFAULT_WORK_AGENT)?.label || DEFAULT_WORK_AGENT} at xhigh and will be marked for {projectConfig.admin.ownerName} to review. After work starts, you can continue the conversation and attach more files.</p>}
       {error && <p className="form-error">{error}</p>}
-      <div className="form-actions"><button type="button" className="button secondary" onClick={onClose} disabled={saving}>Cancel</button><button className="button primary" disabled={saving}>{saving ? 'Uploading & creating…' : canManage ? (routeNow ? 'Create & queue' : 'Create for review') : 'Submit for review'}</button></div>
+      <div className="form-actions"><button type="button" className="button secondary" onClick={requestClose} disabled={saving}>Cancel</button><button className="button primary" disabled={saving}>{saving ? 'Uploading & creating…' : canManage ? (routeNow ? 'Create & queue' : 'Create for review') : 'Submit for review'}</button></div>
     </form>
   </Modal>
+}
+
+function useSyncedDraft<T>(storedValue: T) {
+  const [draft, setDraft] = useState(storedValue)
+  const previousStoredValue = useRef(storedValue)
+
+  useEffect(() => {
+    const previous = previousStoredValue.current
+    previousStoredValue.current = storedValue
+    setDraft((current) => Object.is(current, previous) ? storedValue : current)
+  }, [storedValue])
+
+  return [draft, setDraft] as const
 }
 
 function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail, actorName, onBack, onDone, onSelectItem }: { item: WorkItem; allItems: WorkItem[]; runs: import('../lib/types').AgentLoopRun[]; unreadAtOpen: number; canManage: boolean; actorEmail: string; actorName: string; onBack: () => void; onDone: (changes: Record<string, unknown>, confirmation: string) => void; onSelectItem: (item: WorkItem) => void }) {
@@ -530,9 +616,11 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [copied, setCopied] = useState(false)
-  const [prUrl, setPrUrl] = useState(item.prUrl || '')
-  const [branchName, setBranchName] = useState(item.branchName || '')
-  const [deploymentNotes, setDeploymentNotes] = useState(item.deploymentNotes || '')
+  const [prUrl, setPrUrl] = useSyncedDraft(item.prUrl || '')
+  const [branchName, setBranchName] = useSyncedDraft(item.branchName || '')
+  const [deploymentNotes, setDeploymentNotes] = useSyncedDraft(item.deploymentNotes || '')
+  const [deferredUntil, setDeferredUntil] = useSyncedDraft(localDateTime(item.deferredUntil))
+  const [savedDeferredUntil, setSavedDeferredUntil] = useSyncedDraft(localDateTime(item.deferredUntil))
   const [closing, setClosing] = useState(false)
   const [closeNote, setCloseNote] = useState('')
   const detailShellRef = useRef<HTMLDivElement>(null)
@@ -540,6 +628,7 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
   const deliveryCardRef = useRef<HTMLDetailsElement>(null)
   const replyToolsRef = useRef<HTMLDetailsElement>(null)
   const threadEndRef = useRef<HTMLDivElement>(null)
+  const noteRef = useRef<HTMLTextAreaElement>(null)
   const previousItemIdRef = useRef(item.id)
   const previousMessageCountRef = useRef(groupThreadMessages(item.messages || []).length)
   const wasNearBottomRef = useRef(true)
@@ -573,14 +662,29 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
     if (succeeded) onDone(data, confirmation)
     return succeeded
   }
+  const saveDeferral = async (value: string) => {
+    setBusy(true); setError('')
+    try {
+      const deadline = deferredUntilTimestamp(value)
+      await transactDocument(WORK_ITEMS_COLLECTION, item.id, (snapshot) => {
+        if (!snapshot) throw new Error('This item no longer exists.')
+        const current = snapshot as unknown as WorkItem
+        if (!isLeaseOpen(current)) throw new Error('An agent is already working on this item. Change its deferral after the current run finishes.')
+        if (isTerminalStatus({ kind: item.kind, status: current.status })) throw new Error('Reopen this item before changing its deferral.')
+        return { deferredUntil: deadline, updatedAt: serverTimestamp() }
+      })
+      setDeferredUntil(value); setSavedDeferredUntil(value)
+    } catch (err) { setError(err instanceof Error ? err.message : 'Could not save deferral.') }
+    finally { setBusy(false) }
+  }
   const sentToAgentLabel = `Sent to ${agentByOwner(item.assignedTo)?.short || ownerLabel(item.assignedTo)}`
-  const addMessage = async (returnToAgent = false) => {
-    if (!message.trim() && attachments.length === 0) return
+  const addMessage = async (returnToAgent = false, body = message.trim()) => {
+    if (busy || (!body && attachments.length === 0)) return
     setBusy(true); setError('')
     let uploaded: UploadedAttachments | undefined
     try {
       uploaded = await uploadWorkAttachments(attachments, item.kind, item.id, actorEmail)
-      const changes: Record<string, unknown> = { messages: arrayUnion({ author: actorName, authorEmail: actorEmail.toLowerCase(), body: message.trim(), imageUrls: uploaded.urls, createdAt: nowTimestamp() }), updatedAt: serverTimestamp() }
+      const changes: Record<string, unknown> = { messages: arrayUnion({ author: actorName, authorEmail: actorEmail.toLowerCase(), body, imageUrls: uploaded.urls, createdAt: nowTimestamp() }), updatedAt: serverTimestamp() }
       if (returnToAgent) Object.assign(changes, { waitingOn: 'agent', status: 'in_progress', blockedReason: null, leaseExpiresAt: null, claimedBy: null })
       await updateItem(changes)
       setMessage(''); setAttachments([]); setAttachmentError('')
@@ -711,6 +815,13 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
     return syncPhoneDetailHeight(appShell, detailScrollRef.current)
   }, [item.id])
 
+  useLayoutEffect(() => {
+    const note = noteRef.current
+    if (!note) return
+    if (isPhoneLayout) fitNoteToText(note)
+    else note.style.removeProperty('height')
+  }, [message, isPhoneLayout, previewingMessage])
+
   useEffect(() => {
     previousItemIdRef.current = item.id
     previousMessageCountRef.current = groupedMessages.length
@@ -734,12 +845,28 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
   const deliverySummary = item.prNumber ? `PR #${item.prNumber}` : item.prUrl ? 'PR linked' : 'No PR yet'
   const collaboratorCanReturn = !canManage && gate !== 'triage' && gate !== 'deploy_approval' && gate !== 'acceptance_review' && item.status !== 'ready_for_deploy'
   const canReturnToAgent = item.waitingOn === 'human' && Boolean(item.assignedTo) && (canManage || collaboratorCanReturn)
+  const choices = !isTerminal && canReturnToAgent && gate === 'question' ? questionChoices(item) : []
   const showApprove = canManage && canApproveAndReturn(item)
   const composerReady = Boolean(message.trim()) || attachments.length > 0
   const approveButton = (className: string) => <button type="button" className={className} disabled={busy} onClick={() => void approveAndReturn()}>✓ Approve → return to agent</button>
   const deployActionButton = (readyLabel: string) => deployApprovalReady
     ? <button type="button" className="action deploy-action" disabled={busy} onClick={() => void sendToDeploy()}>{readyLabel}</button>
     : <button type="button" className="action warning-action deploy-preparation-action" disabled={busy} aria-describedby={deployHandoffHintId} title={deployApprovalHint} onClick={prepareDeployment}>{deployPreparationLabel}</button>
+  const choiceButtons = choices.length > 0 && <div className="question-choices" role="group" aria-label="Question choices">
+    <span>Answer & return to {ownerLabel(item.assignedTo)}:</span>
+    {choices.map((choice) => <button type="button" className="button secondary" key={choice.letter} title={choice.label} disabled={busy} onClick={() => void addMessage(true, [`${choice.letter}) ${choice.label}`, message.trim()].filter(Boolean).join('\n\n'))}>Choose {choice.letter}</button>)}
+  </div>
+  const quickReplies = <div className="filter-group quick-replies" role="group" aria-label="Quick replies">{QUICK_REPLIES.map((reply) => <button type="button" key={reply} disabled={busy} onClick={() => setMessage(quickReplyDraft(reply))}>{reply}</button>)}</div>
+  const previewToggle = <button type="button" className="reply-preview-toggle" aria-pressed={previewingMessage} onClick={() => setPreviewingMessage((value) => !value)}>Preview</button>
+  // The attach button is small, so the whole compose row accepts dropped files. A drop
+  // on the button itself is already handled there and arrives here default-prevented;
+  // dragged text still falls through to the text box.
+  const draggingFiles = (event: DragEvent<HTMLDivElement>) => !event.defaultPrevented && Array.from(event.dataTransfer.types).includes('Files')
+  const dropAttachments = (event: DragEvent<HTMLDivElement>) => {
+    if (!draggingFiles(event)) return
+    event.preventDefault()
+    if (!busy) addAttachments(Array.from(event.dataTransfer.files))
+  }
   const sendOnShortcut = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || !(event.metaKey || event.ctrlKey)) return
     event.preventDefault()
@@ -786,7 +913,7 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
 
   const bottomRoutingControls = canManage && !isTerminal ? <div className="detail-action-routing" aria-label="Quick routing controls">
     <label>Priority<select aria-label="Bottom action priority" value={item.priority} disabled={busy} onChange={(event) => void patch({ priority: event.target.value })}>{['critical', 'high', 'medium', 'low'].map((value) => <option key={value}>{value}</option>)}</select></label>
-    <label>Effort<select aria-label="Bottom action effort" value={item.thinkingEffort || 'xhigh'} disabled={busy} onChange={(event) => void patch({ thinkingEffort: event.target.value })}>{['low', 'medium', 'high', 'xhigh'].map((value) => <option key={value}>{value}</option>)}</select></label>
+    <label>Effort<select aria-label="Bottom action effort" value={item.thinkingEffort || 'xhigh'} disabled={busy} onChange={(event) => void patch({ thinkingEffort: event.target.value })}>{thinkingEffortsFor(item.assignedTo, item.thinkingEffort).map((value) => <option key={value}>{value}</option>)}</select></label>
     <label>Machine<select aria-label="Bottom action machine" value={item.targetMachine || projectConfig.automation.defaultMachineId} disabled={busy} onChange={(event) => void patch({ targetMachine: event.target.value })}>{![projectConfig.automation.defaultMachineId, 'any'].includes(item.targetMachine) && <option value={item.targetMachine}>{item.targetMachine}</option>}<option value={projectConfig.automation.defaultMachineId}>{projectConfig.automation.defaultMachineLabel}</option><option value="any">Any machine</option></select></label>
   </div> : null
 
@@ -813,12 +940,16 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
           <label>Priority<select aria-label="Priority" value={item.priority} disabled={busy} onChange={(event) => void patch({ priority: event.target.value })}>{['critical', 'high', 'medium', 'low'].map((value) => <option key={value}>{value}</option>)}</select></label>
           {canManage ? <>
             <label>Agent model<OwnerSelect value={item.assignedTo || ''} onChange={(value) => void patch({ assignedTo: value, claimedBy: null, leaseExpiresAt: null })} /></label>
-            <label>Thinking effort<select aria-label="Thinking effort" value={item.thinkingEffort || 'xhigh'} disabled={busy} onChange={(event) => void patch({ thinkingEffort: event.target.value })}>{['low', 'medium', 'high', 'xhigh'].map((value) => <option key={value}>{value}</option>)}</select></label>
+            <label>Thinking effort<select aria-label="Thinking effort" value={item.thinkingEffort || 'xhigh'} disabled={busy} onChange={(event) => void patch({ thinkingEffort: event.target.value })}>{thinkingEffortsFor(item.assignedTo, item.thinkingEffort).map((value) => <option key={value}>{value}</option>)}</select></label>
+            <label className="deferred-until-field">Deferred until<input type="datetime-local" value={deferredUntil} disabled={busy || isTerminal || !isLeaseOpen(item)} onChange={(event) => setDeferredUntil(event.target.value)} /></label>
+            <div className="form-actions deferral-actions"><button type="button" className="button secondary" disabled={busy || isTerminal || !isLeaseOpen(item) || deferredUntil === savedDeferredUntil} onClick={() => void saveDeferral(deferredUntil)}>Save deferral</button><button type="button" className="button secondary" disabled={busy || isTerminal || !isLeaseOpen(item) || !savedDeferredUntil} onClick={() => void saveDeferral('')}>Clear deferral</button></div>
           </> : <>
             <ReadonlyField label="Agent model" value={ownerLabel(item.assignedTo)} />
             <ReadonlyField label="Thinking effort" value={item.thinkingEffort || 'xhigh'} />
+            <ReadonlyField label="Deferred until" value={toDate(item.deferredUntil)?.toLocaleString() || 'Not deferred'} />
           </>}
         </div>
+        {canManage && <p className="muted">Deferral uses your local time ({Intl.DateTimeFormat().resolvedOptions().timeZone}). The item stays in Agent when queued, and becomes eligible on the first loop after its deadline. Active work must finish before its deadline can be changed.</p>}
       </section>
 
       <WorkItemDependencies item={item} allItems={allItems} canManage={canManage} disabled={busy} onChange={(dependsOn) => void patch({ dependsOn })} onSelectItem={onSelectItem} />
@@ -859,22 +990,21 @@ function ItemDetail({ item, allItems, runs, unreadAtOpen, canManage, actorEmail,
     </div>
 
     <form className={`detail-reply ${isPhoneLayout ? 'compact-detail-reply' : ''}`} onSubmit={(event) => { event.preventDefault(); void addMessage(false) }}>
-      {isPhoneLayout ? <details className="reply-tools" ref={replyToolsRef}><summary role="button">Reply tools <span>{canManage ? 'Item actions · ' : ''}Quick replies · Preview</span></summary><div>
-        {canManage && <section className="phone-item-actions" aria-label="Item actions"><span>Item actions</span><div className="action-bar">{actionBar}</div></section>}
-        <div className="filter-group quick-replies" role="group" aria-label="Quick replies">{QUICK_REPLIES.map((reply) => <button type="button" key={reply} disabled={busy} onClick={() => setMessage(quickReplyDraft(reply))}>{reply}</button>)}</div>
-        <div className="reply-compose-toolbar"><span>{previewingMessage ? 'Markdown preview' : 'Markdown supported'}</span><button type="button" aria-pressed={previewingMessage} onClick={() => setPreviewingMessage((value) => !value)}>Preview</button></div>
-      </div></details> : <>
-        <div className="filter-group quick-replies" role="group" aria-label="Quick replies">{QUICK_REPLIES.map((reply) => <button type="button" key={reply} disabled={busy} onClick={() => setMessage(quickReplyDraft(reply))}>{reply}</button>)}</div>
-        <div className="reply-compose-toolbar"><span>{previewingMessage ? 'Markdown preview' : 'Markdown supported'}</span><button type="button" aria-pressed={previewingMessage} onClick={() => setPreviewingMessage((value) => !value)}>Preview</button></div>
-      </>}
-      <div className="reply-compose">{previewingMessage ? <div className="reply-preview" aria-label="Note preview">{message.trim() ? <Markdown source={message} /> : <p className="muted">Nothing to preview yet.</p>}</div> : <textarea aria-label="Add note" rows={isPhoneLayout ? 1 : 2} placeholder={isPhoneLayout ? 'Add a note… (⌘↵ to send)' : 'Add context or paste an attachment… (⌘↵ to send)'} value={message} onPaste={handlePaste} onKeyDown={sendOnShortcut} onChange={(event) => setMessage(event.target.value)} />}
-      <AttachmentPicker compact files={attachments} disabled={busy} onAdd={addAttachments} onRemove={(index) => setAttachments((current) => current.filter((_, currentIndex) => currentIndex !== index))} /></div>
+      {isPhoneLayout ? <>
+        {choiceButtons}
+        <details className="reply-tools" ref={replyToolsRef}><summary role="button">Reply tools <span>{canManage ? 'Item actions · ' : ''}Quick replies · Preview</span></summary><div>
+          {canManage && <section className="phone-item-actions" aria-label="Item actions"><span>Item actions</span><div className="action-bar">{actionBar}</div></section>}
+          {quickReplies}
+          <div className="reply-compose-toolbar"><span>{previewingMessage ? 'Markdown preview' : 'Markdown supported'}</span>{previewToggle}</div>
+        </div></details>
+      </> : <div className="reply-toolbar">{choiceButtons}{quickReplies}{previewToggle}</div>}
+      <div className="reply-compose" onDragOver={(event) => { if (draggingFiles(event)) event.preventDefault() }} onDrop={dropAttachments}>{previewingMessage ? <div className="reply-preview" aria-label="Note preview">{message.trim() ? <Markdown source={message} /> : <p className="muted">Nothing to preview yet.</p>}</div> : <textarea ref={noteRef} aria-label="Add note" rows={isPhoneLayout ? 1 : 2} placeholder={isPhoneLayout ? 'Add a note… (⌘↵ to send)' : 'Add context or paste an attachment · Markdown supported · ⌘↵ to send'} value={message} onPaste={handlePaste} onKeyDown={sendOnShortcut} onChange={(event) => setMessage(event.target.value)} />}
+      <AttachmentPicker compact files={attachments} disabled={busy} onAdd={addAttachments} onRemove={(index) => setAttachments((current) => current.filter((_, currentIndex) => currentIndex !== index))} />
+      {!isPhoneLayout && <div className="reply-send"><button type="submit" className="button secondary" disabled={busy || !composerReady}>Add note</button>{canReturnToAgent && <button type="button" className="button primary" disabled={busy || !composerReady} onClick={() => void addMessage(true)}>Add & return to agent</button>}</div>}</div>
       {attachmentError && <p className="form-error">{attachmentError}</p>}
-      {isPhoneLayout
-        ? <div className="compact-reply-actions">{canReturnToAgent
-          ? <button type="button" className="button primary" disabled={busy || !composerReady} onClick={() => void addMessage(true)}>Add & return to agent</button>
-          : <button type="submit" className="button primary" disabled={busy || !composerReady}>Add note</button>}</div>
-        : <div>{showApprove && approveButton('button success')}<button type="submit" className="button secondary" disabled={busy || !composerReady}>Add note</button>{canReturnToAgent && <button type="button" className="button primary" disabled={busy || !composerReady} onClick={() => void addMessage(true)}>Add & return to agent</button>}</div>}
+      {isPhoneLayout && <div className="compact-reply-actions">{canReturnToAgent
+        ? <button type="button" className="button primary" disabled={busy || !composerReady} onClick={() => void addMessage(true)}>Add & return to agent</button>
+        : <button type="submit" className="button primary" disabled={busy || !composerReady}>Add note</button>}</div>}
     </form>
     {closing && <Modal title={`Mark ${itemRef(item.kind, item.number)} done without a deployment`} onClose={busy ? () => undefined : () => setClosing(false)}>
       <form className="form-stack" onSubmit={(event) => { event.preventDefault(); void closeWithoutDeployment() }}>

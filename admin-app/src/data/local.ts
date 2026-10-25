@@ -146,6 +146,12 @@ export function createLocalAdapter({
     async deleteDoc(name, id) {
       await call('DELETE', `/api/docs/${segment(name)}/${segment(id)}`)
     },
+    async transactDocument(name, id, decide) {
+      const path = `/api/docs/${segment(name)}/${segment(id)}`
+      const current = await call<{ exists: boolean; data: Record<string, unknown> | null }>('GET', path)
+      const patch = decide(current.exists && current.data ? current.data : undefined)
+      await call('PATCH', path, { patch: encodeWire(patch) })
+    },
     async createWorkItem({ id, counterField, data }) {
       const result = await call<{ number: number }>('POST', '/api/work-items', { id, counterField, data: encodeWire(data) })
       return result.number

@@ -16,6 +16,7 @@ function fakeAdapter(): DataAdapter {
     setDoc: vi.fn(async () => undefined),
     updateDoc: vi.fn(async () => undefined),
     deleteDoc: vi.fn(async () => undefined),
+    transactDocument: vi.fn(async () => undefined),
     createWorkItem: vi.fn(async () => 1),
     uploadAttachments: vi.fn(async () => ({ urls: [], cleanup: async () => undefined })),
   }

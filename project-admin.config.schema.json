@@ -310,7 +310,9 @@
           "minItems": 1,
           "items": { "type": "string", "minLength": 1 }
         },
-        "promptVia": { "enum": ["arg", "stdin"], "description": "command runner only: pass the prompt through the template (arg) or on stdin." }
+        "promptVia": { "enum": ["arg", "stdin"], "description": "command runner only: pass the prompt through the template (arg) or on stdin." },
+        "pinModel": { "type": "boolean", "description": "Launch exactly `model` instead of the newest model in its tier (Codex) or the CLI's resolved alias." },
+        "efforts": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"] }, "description": "Thinking efforts this agent's CLI accepts for its model; defaults to the runner's list." }
       }
     }
   }

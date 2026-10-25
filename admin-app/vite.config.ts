@@ -2,6 +2,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { allowedNodeEnvironmentFlags } from 'node:process'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
@@ -15,6 +16,12 @@ const projectConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'))
 // the unused adapter, and the Firebase SDK for non-firestore builds, is dropped.
 const backend = projectConfig.backend?.type ?? 'firestore'
 if (!['firestore', 'local', 'github'].includes(backend)) throw new Error(`Unknown backend.type "${backend}" in ${configPath}`)
+
+// Let jsdom provide browser storage instead of Node's experimental global,
+// which has no working Storage methods without a --localstorage-file path.
+const testExecArgv = allowedNodeEnvironmentFlags.has('--no-experimental-webstorage')
+  ? ['--no-experimental-webstorage']
+  : []
 
 export default defineConfig({
   base: `${projectConfig.project.adminPath.replace(/\/$/, '')}/`,
@@ -39,6 +46,10 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    poolOptions: {
+      forks: { execArgv: testExecArgv },
+      threads: { execArgv: testExecArgv },
+    },
     globals: true,
     setupFiles: './src/test/setup.ts',
   },

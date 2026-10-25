@@ -7,15 +7,26 @@ one selectable owner (`<token>-agent`) per configured model. The roster is the
 top-level `agents` array in that file; without one, the built-in roster in
 `scripts/lib/agent-defaults.json` applies:
 
-| Token | Admin owner | Runner | Model |
-|---|---|---|---|
-| `sol` | `sol-agent` | `codex` | `gpt-5.6-sol` |
-| `terra` | `terra-agent` | `codex` | `gpt-5.6-terra` |
-| `luna` | `luna-agent` | `codex` | `gpt-5.6-luna` |
-| `opus` | `opus-agent` | `claude` | `opus` |
-| `sonnet` | `sonnet-agent` | `claude` | `sonnet` |
-| `fable` | `fable-agent` | `claude` | `fable` |
-| `grok` | `grok-agent` | `grok` | print mode |
+| Token | Admin owner | Runner | Configured model | What runs |
+|---|---|---|---|---|
+| `sol` | `sol-agent` | `codex` | `gpt-5.6-sol` | newest `gpt-*-sol` |
+| `terra` | `terra-agent` | `codex` | `gpt-5.6-terra` | newest `gpt-*-terra` |
+| `luna` | `luna-agent` | `codex` | `gpt-5.6-luna` | newest `gpt-*-luna` |
+| `opus` | `opus-agent` | `claude` | `opus` | `--model opus` (newest Opus) |
+| `sonnet` | `sonnet-agent` | `claude` | `sonnet` | `--model sonnet` (newest Sonnet) |
+| `fable` | `fable-agent` | `claude` | `fable` | `--model fable` (newest Fable) |
+| `grok` | `grok-agent` | `grok` | `grok` | the Grok CLI's default model |
+
+Each run uses the newest model in its tier and records the exact model ID on
+its run record, which the admin console shows as a version ("Claude Opus 5.5",
+"Codex Sol 6.1"). The runner adapter decides how (see
+[runners/README.md](runners/README.md)): Codex has no "latest" alias, so its
+`resolve` step asks `resolve-model.js` for the highest-versioned listed slug in
+the configured model's tier from `codex debug models`, clamps the effort to that
+model's menu, and falls back to the configured slug when the catalog cannot be
+read. Claude's alias resolves at launch, and its `observe-model` step reads the
+resolved ID from the session transcript. `CODEX_MODEL`/`CLAUDE_MODEL`, or
+`"pinModel": true` on an agent, pin one exact model instead.
 
 `agentAliases` maps shorthand tokens (`codex` → `terra`, `claude` → `sonnet`).
 Opus (`claimsUnassigned: true`) also sweeps unassigned work. Every other model

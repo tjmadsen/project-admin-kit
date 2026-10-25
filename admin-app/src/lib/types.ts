@@ -4,7 +4,7 @@ export type Priority = 'critical' | 'high' | 'medium' | 'low'
 export type WaitingOn = 'agent' | 'human' | 'deployer' | 'hold' | 'done'
 export type ReviewGate = 'triage' | 'question' | 'plan_review' | 'pr_review' | 'deploy_approval' | 'acceptance_review'
 export type Owner = string
-export type ThinkingEffort = 'low' | 'medium' | 'high' | 'xhigh'
+export type ThinkingEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra'
 
 export interface WorkMessage {
   author: string
@@ -25,6 +25,7 @@ export interface WorkItem {
   waitingOn: WaitingOn
   blockedReason?: ReviewGate
   dependsOn?: string[]
+  deferredUntil?: unknown
   assignedTo: Owner
   thinkingEffort: ThinkingEffort
   targetMachine: string
@@ -71,6 +72,8 @@ export interface AgentLoopRun {
   // workItems, or featureRequests/bugs on runs recorded before the migration.
   activeCollection?: string
   thinkingEffort?: string
+  // The exact model ID the worker ran, e.g. claude-opus-5-5.
+  model?: string
   startedAt: unknown
   heartbeatAt: unknown
   progressAt?: unknown
@@ -112,6 +115,12 @@ export interface AgentLoopUsage {
   codex: AgentLoopUsageEntry | null
 }
 
+// Lifecycle notification event types emitted by the lifecycle Functions (extras/functions); each
+// user's channel preferences are keyed by these names.
+export type NotificationEventType = 'action_required' | 'deployment_failure' | 'deployment_progress' | 'final_outcome'
+export type NotificationChannel = 'email' | 'push'
+export type NotificationPreferences = Partial<Record<NotificationChannel, Partial<Record<NotificationEventType, boolean>>>>
+
 export interface AdminUser {
   id: string
   email: string
@@ -121,4 +130,5 @@ export interface AdminUser {
   createdAt: unknown
   updatedAt: unknown
   createdBy?: string
+  notifications?: NotificationPreferences
 }

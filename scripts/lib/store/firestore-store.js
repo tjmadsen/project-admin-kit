@@ -58,7 +58,8 @@ function createFirestoreStore({ db, FieldValue, Timestamp, uploadAttachments = n
         let query = items();
         if (waitingOn) query = query.where('waitingOn', '==', waitingOn);
         if (kind) query = query.where('kind', '==', kind);
-        const snapshot = await query.limit(limit).get();
+        // limit: null reads every match.
+        const snapshot = await (limit == null ? query : query.limit(limit)).get();
         return snapshot.docs.map((document) => ({ id: document.id, ...document.data() }));
       },
       async update(id, patch, { messages = [] } = {}) {

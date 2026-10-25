@@ -3,12 +3,12 @@ import { Link } from 'react-router-dom'
 import PageHeader from '../components/PageHeader'
 import EmptyState from '../components/EmptyState'
 import { useLoopConfig, useLoopRuns, useLoopUsage, useMachines } from '../hooks/useLoopData'
-import { AGENT_FAMILIES, AGENT_MODELS, agentByToken, runnerLabel, type AgentModel, type AgentModelToken } from '../lib/agents'
+import { AGENT_FAMILIES, AGENT_MODELS, agentByToken, latestRunModels, runnerLabel, versionedAgentLabel, type AgentModel, type AgentModelToken } from '../lib/agents'
 import { serverTimestamp, setDocument } from '../data'
 import { formatRelative, toDate } from '../lib/format'
 import type { AgentLoopRun, AgentLoopUsageEntry } from '../lib/types'
 import { projectConfig } from '../lib/project-config'
-import { workKindForReference, workKindPath } from '../lib/work-kinds'
+import { WORK_KINDS, workKindForReference, workKindPath } from '../lib/work-kinds'
 
 const USAGE_STALE_MS = 50 * 60_000
 // A run heartbeats every minute, so six minutes of silence means the runner is
@@ -142,6 +142,9 @@ export default function AgentLoops({ canManage = true }: { canManage?: boolean }
   const [page, setPage] = useState(1)
   const [now, setNow] = useState(() => Date.now())
   const current = runs.filter((run) => runOutcome(run, now) === 'running')
+  const latestModels = useMemo(() => latestRunModels(runs), [runs])
+  const labelFor = (agent: AgentModel) => versionedAgentLabel(agent.label, latestModels.get(agent.token))
+  const deployAgent = agentByToken(config.deployAgent)
   const filteredRuns = useMemo(() => runs.filter((run) =>
     (queueFilter === 'all' || run.queue === queueFilter)
     && (modelFilter === 'all' || run.agent === modelFilter)
@@ -178,27 +181,12 @@ export default function AgentLoops({ canManage = true }: { canManage?: boolean }
           : <article className="usage-card unavailable" key={group.key}><div><span>{group.label}</span><strong>—</strong></div><p>{group.detail}</p><small>CLI plan usage is not exposed</small><div className="usage-track"><i style={{ width: '0%' }} /></div></article>)}
       </div>
     </section>
-    <section className="panel loop-config-panel">
-      <div><p className="eyebrow">Queue routing</p><h2>Choose who ships production</h2><p>Build models are selected on each work item. The shared deploy queue uses this model for its next fresh-context run.</p></div>
-      {canManage
-        ? <label>Deploy loop model<select aria-label="Deploy loop model" value={config.deployAgent} disabled={saving} onChange={(event) => void setDeployAgent(event.target.value as AgentModelToken)}>{AGENT_MODELS.map((agent) => <option key={agent.token} value={agent.token}>{agent.emoji} {agent.label}</option>)}</select><small>{saving ? 'Saving…' : 'Saved automatically · used on the next poll'}</small></label>
-        : <div className="readonly-field loop-readonly-field"><span>Deploy loop model</span><strong>{agentByToken(config.deployAgent)?.label || config.deployAgent}</strong><small>Administrators control deploy routing. You can view usage, workers, and run history.</small></div>}
-    </section>
-    <section className="loop-agent-grid">
-      {AGENT_MODELS.map((agent) => {
-        const active = current.find((run) => run.agent === agent.token)
-        const latest = runs.find((run) => run.agent === agent.token)
-        const deployer = config.deployAgent === agent.token
-        const unguarded = guardDescription(agent)
-        return <article className={`loop-agent-card ${deployer ? 'deployer' : ''}`} key={agent.token}><div className={`agent-glyph ${agent.family}`}>{agent.emoji}</div><div><p className="eyebrow">{active ? 'Running now' : deployer ? 'Deploy model' : 'Available'}{unguarded && <span className="unguarded-badge" title={unguarded} aria-label={`Unguarded: ${unguarded}`}>unguarded</span>}</p><h2>{agent.label}</h2><p>{active ? `${active.queue} · ${active.activeItem || 'selecting work'}` : latest ? `Last ${latest.status} ${formatRelative(latest.finishedAt || latest.startedAt)}` : agent.model}</p></div><i className={active ? 'live' : ''} /></article>
-      })}
-    </section>
     <section className="dashboard-grid loops-layout">
       <div className="panel">
         <div className="panel-heading"><div><p className="eyebrow">Live run history</p><h2>What the loops actually did</h2></div><small>{filteredRuns.length} runs · live updates</small></div>
         <div className="run-filters">
-          <label>Queue<select aria-label="Filter runs by queue" value={queueFilter} onChange={(event) => setQueueFilter(event.target.value)}><option value="all">All queues</option><option value="feature">Feature</option><option value="bug">Bug</option><option value="deploy">Deploy</option></select></label>
-          <label>Model<select aria-label="Filter runs by model" value={modelFilter} onChange={(event) => setModelFilter(event.target.value)}><option value="all">All models</option>{AGENT_MODELS.map((agent) => <option key={agent.token} value={agent.token}>{agent.label}</option>)}</select></label>
+          <label>Queue<select aria-label="Filter runs by queue" value={queueFilter} onChange={(event) => setQueueFilter(event.target.value)}><option value="all">All queues</option>{WORK_KINDS.map((kind) => <option key={kind.id} value={kind.id}>{kind.label}</option>)}<option value="deploy">Deploy</option></select></label>
+          <label>Model<select aria-label="Filter runs by model" value={modelFilter} onChange={(event) => setModelFilter(event.target.value)}><option value="all">All models</option>{AGENT_MODELS.map((agent) => <option key={agent.token} value={agent.token}>{labelFor(agent)}</option>)}</select></label>
           <label>Outcome<select aria-label="Filter runs by outcome" value={outcomeFilter} onChange={(event) => setOutcomeFilter(event.target.value)}><option value="all">All outcomes</option><option value="running">Running</option><option value="completed">Completed</option><option value="failed">Failed</option><option value="interrupted">Interrupted</option></select></label>
         </div>
         {runs.length === 0 ? <EmptyState title="No loop runs yet" copy="Provision the Mac Studio or run a one-shot smoke test from Operations." /> : <div className="run-table">
@@ -212,6 +200,23 @@ export default function AgentLoops({ canManage = true }: { canManage?: boolean }
         <div className="panel-heading"><div><p className="eyebrow">Machines</p><h2>Runner health</h2></div></div>
         {machines.length === 0 ? <EmptyState title="No heartbeat" copy={`Run provision-machine.sh to register ${projectConfig.automation.defaultMachineLabel}.`} /> : machines.map((machine) => <article className="machine-card" key={machine.id}><div><i className={isFresh(machine.lastSeenAt, 10) ? 'online' : ''} /><strong>{machine.label}</strong></div><p>{machine.hostname}</p><span>{machine.repoRoot}</span><small>{machine.agents?.join(' · ')} · {formatRelative(machine.lastSeenAt)}</small></article>)}
       </aside>
+    </section>
+    <section className="panel loop-roster-panel">
+      <div className="panel-heading">
+        <div><p className="eyebrow">All models</p><h2>Every model on {projectConfig.automation.defaultMachineLabel}</h2></div>
+        {canManage
+          ? <label className="loop-deploy-field"><span>Deploy model</span><select aria-label="Deploy loop model" value={config.deployAgent} disabled={saving} onChange={(event) => void setDeployAgent(event.target.value as AgentModelToken)}>{AGENT_MODELS.map((agent) => <option key={agent.token} value={agent.token}>{agent.emoji} {labelFor(agent)}</option>)}</select><small>{saving ? 'Saving…' : 'Saved automatically · used on the next poll'}</small></label>
+          : <div className="readonly-field loop-deploy-readonly"><span>Deploy model</span><strong>{deployAgent ? labelFor(deployAgent) : config.deployAgent}</strong><small>Administrators control deploy routing. You can view usage, workers, and run history.</small></div>}
+      </div>
+      <div className="loop-roster">
+        {AGENT_MODELS.map((agent) => {
+          const active = current.find((run) => run.agent === agent.token)
+          const latest = runs.find((run) => run.agent === agent.token)
+          const deployer = config.deployAgent === agent.token
+          const unguarded = guardDescription(agent)
+          return <article className={`loop-roster-row ${deployer ? 'deployer' : ''}`} key={agent.token}><i className={active ? 'live' : ''} /><div><strong>{labelFor(agent)}</strong>{unguarded && <span className="unguarded-badge" title={unguarded} aria-label={`Unguarded: ${unguarded}`}>unguarded</span>}<p>{active ? `${active.queue} · ${active.activeItem || 'selecting work'}` : latest ? `Last ${latest.status} ${formatRelative(latest.finishedAt || latest.startedAt)}` : latestModels.get(agent.token) || agent.model}</p></div><span className="roster-status">{active ? 'Running now' : deployer ? 'Deploy model' : 'Available'}</span></article>
+        })}
+      </div>
     </section>
   </>
 }
@@ -228,7 +233,7 @@ function RunRecord({ run, now, expanded, onToggle }: { run: AgentLoopRun; now: n
       : 'No result output was captured.')
   return <div className="run-record">
     <div className="run-table-row">
-      <span className="agent-name"><i className={`mini-agent ${agent?.family || run.agent}`} />{agent?.short || run.agent}</span>
+      <span className="agent-name"><i className={`mini-agent ${agent?.family || run.agent}`} />{versionedAgentLabel(agent?.short || run.agent, run.model)}<em className="run-queue-chip">{run.queue}</em></span>
       <span className="run-queue">{run.queue}</span>
       <span className="run-effort">{run.thinkingEffort || '—'}</span>
       <span className="run-result"><b className={`run-status ${outcome}`}>{outcome}</b></span>
@@ -241,6 +246,7 @@ function RunRecord({ run, now, expanded, onToggle }: { run: AgentLoopRun; now: n
       <div><span>Exit code</span><strong>{run.exitCode ?? (outcome === 'running' ? 'Running' : '—')}</strong></div>
       <div><span>Machine</span><strong>{run.machineId}</strong></div>
       <div><span>Effort</span><strong>{run.thinkingEffort || '—'}</strong></div>
+      <div><span>Model</span><strong>{run.model || '—'}</strong></div>
       <div><span>{outcome === 'running' ? 'Progress captured' : 'Finished'}</span><strong>{formatLoopStart(outcome === 'running' ? run.progressAt : run.finishedAt, new Date(now))}</strong></div>
       <pre>{detail}</pre>
     </div>}

@@ -1,5 +1,5 @@
-import { Fragment, type ReactNode } from 'react'
-import ReactMarkdown, { type Components } from 'react-markdown'
+import { createContext, Fragment, memo, useContext, useMemo, type ComponentProps, type ReactNode } from 'react'
+import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown'
 import remarkBreaks from 'remark-breaks'
 import remarkGfm from 'remark-gfm'
 
@@ -59,28 +59,49 @@ function exposeTextNodes() {
   }
 }
 
-export default function Markdown({ source, className = '', renderLink, renderText }: MarkdownProps) {
-  const components: Components = {
-    a: ({ node: _node, href = '', children, ...props }) => {
-      const external = /^https?:\/\//i.test(href)
-      if (renderLink) return <Fragment>{renderLink({ href, children, external })}</Fragment>
-      return <a {...props} className="work-item-link" href={href} target={external ? '_blank' : undefined} rel={external ? 'noopener noreferrer' : undefined}>{children}</a>
-    },
-    span: ({ node: _node, children, ...props }) => {
-      const isExposedText = Boolean((props as Record<string, unknown>)['data-markdown-text'])
-      if (isExposedText && renderText) return <Fragment>{renderText(String(children ?? ''))}</Fragment>
-      return <span {...props}>{children}</span>
-    },
-  }
+type MarkdownRenderers = Pick<MarkdownProps, 'renderLink' | 'renderText'>
 
-  return <div className={`markdown ${className}`.trim()}>
-    <ReactMarkdown
-      skipHtml
-      remarkPlugins={[remarkGfm, remarkBreaks, preserveRawHtmlAsText]}
-      rehypePlugins={renderText ? [exposeTextNodes] : undefined}
-      components={components}
-    >
-      {source}
-    </ReactMarkdown>
-  </div>
+// react-markdown remounts every element whose renderer changes identity, so the
+// renderers live at module level and read the caller's hooks from context.
+// Rebuilding them on each render replaced every link and text node in the open
+// thread on each keystroke and each live update.
+const MarkdownRenderersContext = createContext<MarkdownRenderers>({})
+
+function MarkdownLink({ node: _node, href = '', children, ...props }: ComponentProps<'a'> & ExtraProps) {
+  const { renderLink } = useContext(MarkdownRenderersContext)
+  const external = /^https?:\/\//i.test(href)
+  if (renderLink) return <Fragment>{renderLink({ href, children, external })}</Fragment>
+  return <a {...props} className="work-item-link" href={href} target={external ? '_blank' : undefined} rel={external ? 'noopener noreferrer' : undefined}>{children}</a>
 }
+
+function MarkdownSpan({ node: _node, children, ...props }: ComponentProps<'span'> & ExtraProps) {
+  const { renderText } = useContext(MarkdownRenderersContext)
+  const isExposedText = Boolean((props as Record<string, unknown>)['data-markdown-text'])
+  if (isExposedText && renderText) return <Fragment>{renderText(String(children ?? ''))}</Fragment>
+  return <span {...props}>{children}</span>
+}
+
+const components: Components = { a: MarkdownLink, span: MarkdownSpan }
+const remarkPlugins = [remarkGfm, remarkBreaks, preserveRawHtmlAsText]
+const textRehypePlugins = [exposeTextNodes]
+
+function Markdown({ source, className = '', renderLink, renderText }: MarkdownProps) {
+  const renderers = useMemo(() => ({ renderLink, renderText }), [renderLink, renderText])
+
+  return <MarkdownRenderersContext.Provider value={renderers}>
+    <div className={`markdown ${className}`.trim()}>
+      <ReactMarkdown
+        skipHtml
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={renderText ? textRehypePlugins : undefined}
+        components={components}
+      >
+        {source}
+      </ReactMarkdown>
+    </div>
+  </MarkdownRenderersContext.Provider>
+}
+
+// A note re-renders only when its own source or hooks change, so typing in the
+// composer no longer re-parses every note in the thread.
+export default memo(Markdown)

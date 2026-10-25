@@ -1,4 +1,5 @@
 import { useEffect, useState, type DragEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { ATTACHMENT_ACCEPT, MAX_ATTACHMENT_COUNT, MAX_ATTACHMENT_MB, documentKind } from '../lib/attachments'
 
 export function AttachmentPicker({ files, disabled, compact = false, onAdd, onRemove }: { files: File[]; disabled?: boolean; compact?: boolean; onAdd: (files: File[]) => void; onRemove: (index: number) => void }) {
@@ -10,7 +11,7 @@ export function AttachmentPicker({ files, disabled, compact = false, onAdd, onRe
   }
   return <div className={`attachment-picker ${compact ? 'compact' : ''}`}>
     {files.length > 0 && <div className="pending-attachments">{files.map((file, index) => <LocalAttachment key={`${file.name}-${file.size}-${file.lastModified}-${index}`} file={file} index={index} onRemove={onRemove} />)}</div>}
-    <label className={`attachment-dropzone ${dragging ? 'dragging' : ''} ${disabled ? 'disabled' : ''}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true) }} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setDragging(false)} onDrop={drop}>
+    <label className={`attachment-dropzone ${dragging ? 'dragging' : ''} ${disabled ? 'disabled' : ''}`} title={compact ? `Attach images, PDF, CSV, or TXT · up to ${MAX_ATTACHMENT_COUNT} files · ${MAX_ATTACHMENT_MB} MB each` : undefined} onDragEnter={(event) => { event.preventDefault(); setDragging(true) }} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setDragging(false)} onDrop={drop}>
       <span>▧</span><strong>{files.length ? 'Add more attachments' : 'Drop or choose attachments'}</strong><small>Images, PDF, CSV, or TXT · up to {MAX_ATTACHMENT_COUNT} files · {MAX_ATTACHMENT_MB} MB each</small>
       <input aria-label="Choose attachments" type="file" accept={ATTACHMENT_ACCEPT} multiple disabled={disabled} onChange={(event) => { if (event.target.files) onAdd(Array.from(event.target.files)); event.target.value = '' }} />
     </label>
@@ -81,7 +82,7 @@ export function AttachmentGallery({ urls, label = 'Attachment' }: { urls: string
           </a>
         : <button className="attachment-image" type="button" key={`${url}-${index}`} onClick={() => setActiveIndex(galleryIndex)}><img src={url} alt={`${label} ${index + 1}`} loading="lazy" /></button>
     })}</div>
-    {active && activeIndex != null && <div className="image-lightbox" role="dialog" aria-modal="true" aria-label="Image preview" onMouseDown={(event) => { if (event.target === event.currentTarget) setActiveIndex(null) }}>
+    {active && activeIndex != null && createPortal(<div className="image-lightbox" role="dialog" aria-modal="true" aria-label="Image preview" onMouseDown={(event) => { if (event.target === event.currentTarget) setActiveIndex(null) }}>
       <button className="image-lightbox-close" type="button" aria-label="Close image preview" onClick={() => setActiveIndex(null)}>×</button>
       {images.length > 1 && <>
         <button className="image-lightbox-nav previous" type="button" aria-label="Previous image" disabled={activeIndex === 0} onClick={() => setActiveIndex((current) => current == null ? current : Math.max(0, current - 1))}>‹</button>
@@ -89,6 +90,6 @@ export function AttachmentGallery({ urls, label = 'Attachment' }: { urls: string
         <span className="image-lightbox-position" aria-live="polite">Image {activeIndex + 1} of {images.length}</span>
       </>}
       <img src={active.url} alt={`${label} ${active.attachmentIndex + 1} full size`} />
-    </div>}
+    </div>, document.body)}
   </>
 }

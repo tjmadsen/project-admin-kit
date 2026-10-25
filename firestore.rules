@@ -33,6 +33,26 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/system/projectConfig).data;
     }
 
+    // Lifecycle notification preferences: an optional `notifications` map
+    // holding `email` and/or `push` maps whose values are booleans keyed by
+    // the four lifecycle event types the lifecycle Functions emit.
+    function notificationChannelIsValid(channel) {
+      return channel is map
+        && channel.keys().hasOnly(['action_required', 'deployment_failure', 'deployment_progress', 'final_outcome'])
+        && (!('action_required' in channel) || channel.action_required is bool)
+        && (!('deployment_failure' in channel) || channel.deployment_failure is bool)
+        && (!('deployment_progress' in channel) || channel.deployment_progress is bool)
+        && (!('final_outcome' in channel) || channel.final_outcome is bool);
+    }
+
+    function notificationPreferencesAreValid(data) {
+      return !('notifications' in data)
+        || (data.notifications is map
+          && data.notifications.keys().hasOnly(['email', 'push'])
+          && (!('email' in data.notifications) || notificationChannelIsValid(data.notifications.email))
+          && (!('push' in data.notifications) || notificationChannelIsValid(data.notifications.push)));
+    }
+
     function pushDeviceTokenIsOwned(data, tokenId) {
       return isCollaborator()
         && data.uid == request.auth.uid
@@ -239,11 +259,13 @@ service cloud.firestore {
       allow create: if isAdmin()
         && request.resource.data.email == email
         && request.resource.data.role in ['admin', 'collaborator']
-        && request.resource.data.active is bool;
+        && request.resource.data.active is bool
+        && notificationPreferencesAreValid(request.resource.data);
       allow update: if isAdmin()
         && request.resource.data.email == email
         && request.resource.data.role in ['admin', 'collaborator']
         && request.resource.data.active is bool
+        && notificationPreferencesAreValid(request.resource.data)
         && (email != request.auth.token.email
           || (request.resource.data.role == 'admin' && request.resource.data.active == true));
       allow delete: if isAdmin() && email != request.auth.token.email;

@@ -71,6 +71,13 @@ export function itemRef(kind: string, number: number) {
   return `${workKindOrFallback(kind).prefix}-${number}`
 }
 
+// A full-page link to an item, e.g. /admin/features?item=FR-98, under the
+// configured admin path and the kind's own route.
+export function adminWorkItemPath(item: Pick<WorkItem, 'kind' | 'number'>) {
+  const base = projectConfig.project.adminPath.replace(/\/$/, '')
+  return `${base}/${workKindOrFallback(item.kind).route}?item=${encodeURIComponent(itemRef(item.kind, item.number))}`
+}
+
 export function matchesItemReference(item: WorkItem, reference: string | null) {
   if (!reference) return false
   const normalized = reference.trim().toLowerCase()
